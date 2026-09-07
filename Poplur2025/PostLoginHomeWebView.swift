@@ -794,6 +794,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         private var locationPermissionRequestInFlight = false
         private var photoPermissionRequestInFlight = false
         private var notificationObservers: [NSObjectProtocol] = []
+        private var mapDiscoveryTask: Task<Void, Never>?
         private var currentWebTab: String
         private var webReportsLiveCamera = false
         private var nativeMapPresentationActive = false
@@ -1275,6 +1276,26 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     Task { @MainActor [weak self] in
                         await PoplurNotificationCenter.shared.dismissNotifications(ids: ids)
                         self?.pushNotificationInbox(PoplurNotificationCenter.shared.notifications)
+                    }
+                }
+                if type == "mapDiscoveryQuery", let webView = bridge.webView,
+                   let requestID = body["requestId"] as? String, requestID.count <= 100,
+                   let query = body["query"] as? [String: Any] {
+                    mapDiscoveryTask?.cancel()
+                    mapDiscoveryTask = Task { @MainActor [weak webView] in
+                        var payload: [String: Any] = ["requestId": requestID]
+                        do {
+                            let result = try await Functions.functions(region: "us-central1")
+                                .httpsCallable("queryMapDiscovery").call(query)
+                            guard !Task.isCancelled else { return }
+                            payload["result"] = result.data
+                        } catch {
+                            guard !Task.isCancelled else { return }
+                            payload["error"] = "Could not load this area."
+                        }
+                        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+                              let json = String(data: data, encoding: .utf8) else { return }
+                        webView?.evaluateJavaScript("window.dispatchEvent(new CustomEvent('poplur-map-discovery-result',{detail:\(json)}));true;", completionHandler: nil)
                     }
                 }
                 if type == "requestAccountPrivacy", let webView = bridge.webView {
