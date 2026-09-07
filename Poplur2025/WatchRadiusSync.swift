@@ -17,6 +17,9 @@ final class WatchRadiusSync: NSObject {
     private var refreshTask: Task<Void, Never>?
     private var refreshToken: UUID?
     private var refreshRequested = false
+    private var authListener: AuthStateDidChangeListenerHandle?
+    private var latestSnapshot: WatchRadiusSnapshot?
+    private var latestUserID: String?
 
     private override init() {
         super.init()
@@ -33,7 +36,16 @@ final class WatchRadiusSync: NSObject {
 
         configureWatchConnectivity()
         registerObservers()
+        authListener = Auth.auth().addStateDidChangeListener { [weak self] _, _ in
+            Task { @MainActor in self?.refreshAndSendRadius() }
+        }
         refreshAndSendRadius()
+    }
+
+    /// Reuse the exact live account total forwarded to the reachable web home.
+    func publishAccountRadius(radiusMeters: Double, postCount: Int, userID: String) {
+        guard userID == Auth.auth().currentUser?.uid, radiusMeters.isFinite else { return }
+        send(radiusMeters: radiusMeters, postCount: postCount)
     }
 
     func refreshAndSendRadius() {
@@ -70,7 +82,7 @@ final class WatchRadiusSync: NSObject {
 
         do {
             var lastDocument: QueryDocumentSnapshot?
-            var totalRadius = 0
+            var totalRadius = 0.0
             var postCount = 0
 
             while !Task.isCancelled {
@@ -84,7 +96,7 @@ final class WatchRadiusSync: NSObject {
                 let snapshot = try await query.getDocuments()
                 try Task.checkCancellation()
                 for document in snapshot.documents {
-                    totalRadius += Self.radiusValue(from: document.data())
+                    totalRadius += WatchRadiusSnapshot.postRadiusMeters(document.data())
                     postCount += 1
                 }
 
@@ -159,16 +171,18 @@ final class WatchRadiusSync: NSObject {
         #endif
     }
 
-    private func send(radiusMeters: Int, postCount: Int) {
+    private func send(radiusMeters: Double, postCount: Int) {
         guard WCSession.isSupported() else { return }
+        latestSnapshot = WatchRadiusSnapshot(radiusMeters: radiusMeters, postCount: postCount)
+        latestUserID = Auth.auth().currentUser?.uid
+        sendLatestSnapshot()
+    }
 
-        let payload: [String: Any] = [
-            "overallRadiusMeters": max(0, radiusMeters),
-            "postCount": max(0, postCount),
-            "updatedAt": Date().timeIntervalSince1970
-        ]
-
+    private func sendLatestSnapshot() {
         let session = WCSession.default
+        guard session.activationState == .activated,
+              latestUserID == Auth.auth().currentUser?.uid,
+              let payload = latestSnapshot?.payload else { return }
         do {
             try session.updateApplicationContext(payload)
         } catch {
@@ -182,13 +196,6 @@ final class WatchRadiusSync: NSObject {
         }
     }
 
-    private static func radiusValue(from data: [String: Any]) -> Int {
-        if let value = data["radius"] as? Int { return value }
-        if let value = data["radius"] as? Double { return Int(value) }
-        if let value = data["radius"] as? NSNumber { return value.intValue }
-        if let value = data["radius"] as? String { return Int(value) ?? 0 }
-        return 0
-    }
 }
 
 extension WatchRadiusSync: WCSessionDelegate {
@@ -198,7 +205,26 @@ extension WatchRadiusSync: WCSessionDelegate {
         error: Error?
     ) {
         Task { @MainActor in
-            WatchRadiusSync.shared.refreshAndSendRadius()
+            self.sendLatestSnapshot()
+            self.refreshAndSendRadius()
+        }
+    }
+
+    nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
+        guard session.isReachable else { return }
+        Task { @MainActor in self.refreshAndSendRadius() }
+    }
+
+    nonisolated func session(_ session: WCSession, didReceiveMessage message: [String: Any],
+                            replyHandler: @escaping ([String: Any]) -> Void) {
+        guard message["request"] as? String == "radiusSnapshot" else {
+            replyHandler(["pending": true])
+            return
+        }
+        Task { @MainActor in
+            self.refreshAndSendRadius()
+            let snapshot = self.latestUserID == Auth.auth().currentUser?.uid ? self.latestSnapshot : nil
+            replyHandler(snapshot?.payload ?? ["pending": true])
         }
     }
 

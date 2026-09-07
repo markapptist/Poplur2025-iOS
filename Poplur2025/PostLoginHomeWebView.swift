@@ -2862,7 +2862,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                         self.ownFeedDocuments = snapshot.documents
                         let totals = snapshot.documents.reduce(into: (earned: 0.0, reach: 0.0)) { totals, document in
                             let data = document.data()
-                            let reach = max(0, (data["radiusMeters"] as? NSNumber ?? data["radius"] as? NSNumber)?.doubleValue ?? 0)
+                            let reach = WatchRadiusSnapshot.postRadiusMeters(data)
                             let seed = max(0, (data["seedRadiusMeters"] as? NSNumber)?.doubleValue ?? 0)
                             let earned = max(0, (data["organicRadiusMeters"] as? NSNumber)?.doubleValue ?? (reach - seed))
                             totals.earned += min(6_371_000, earned)
@@ -2870,6 +2870,8 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                         }
                         let payload: [String: Any] = ["uid": uid, "radiusKm": totals.earned / 1000,
                             "totalReachKm": totals.reach / 1000, "postCount": snapshot.documents.count]
+                        WatchRadiusSync.shared.publishAccountRadius(radiusMeters: totals.reach,
+                            postCount: snapshot.documents.count, userID: uid)
                         if let encoded = try? JSONSerialization.data(withJSONObject: payload),
                            let json = String(data: encoded, encoding: .utf8) {
                             webView.evaluateJavaScript("window.dispatchEvent(new CustomEvent('poplur-native-account-radius', {detail: \(json)}));true;", completionHandler: nil)

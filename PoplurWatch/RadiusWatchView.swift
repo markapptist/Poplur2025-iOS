@@ -816,9 +816,9 @@ struct RadiusWatchView: View {
         .onReceive(switchTimer) { _ in
             withAnimation(.easeInOut(duration: 0.35)) { showKm.toggle() }
         }
-        .onAppear { WatchAudio.shared.startRadio() }
+        .onAppear { WatchAudio.shared.startRadio(); store.refresh() }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { WatchAudio.shared.startRadio() }
+            if phase == .active { WatchAudio.shared.startRadio(); store.refresh() }
             else { WatchAudio.shared.stopRadio(); WatchAudio.shared.stopStatic() }
         }
         .persistentSystemOverlays(.hidden)
@@ -858,6 +858,7 @@ final class WatchRadiusStore: NSObject, ObservableObject {
     }
 
     func displayValue(metric: Bool) -> String {
+        guard updatedAt != nil else { return "—" }
         guard radiusMeters > 0 else { return "0" }
         if metric {
             let km = radiusMeters / 1_000
@@ -868,7 +869,7 @@ final class WatchRadiusStore: NSObject, ObservableObject {
         }
     }
 
-    var needsPhoneSync: Bool { updatedAt == nil || radiusMeters <= 0 }
+    var needsPhoneSync: Bool { updatedAt == nil }
 
     private func recomputeTrend() {
         let prev = UserDefaults.standard.double(forKey: prevKey)
@@ -879,21 +880,32 @@ final class WatchRadiusStore: NSObject, ObservableObject {
     }
 
     private func apply(_ payload: [String: Any]) {
-        let radius = Self.dbl("overallRadiusMeters", payload)
-            ?? Self.dbl("radiusMeters", payload)
-            ?? Self.dbl("radius", payload) ?? 0
-        let posts = Self.int("postCount", payload) ?? 0
-        let ts    = Self.dbl("updatedAt", payload) ?? Date().timeIntervalSince1970
+        guard let snapshot = WatchRadiusSnapshot(payload: payload),
+              snapshot.shouldReplace(lastUpdatedAt: updatedAt) else { return }
 
         let d = UserDefaults.standard
         d.set(radiusMeters, forKey: prevKey)
-        radiusMeters = max(0, radius)
-        postCount    = max(0, posts)
-        updatedAt    = Date(timeIntervalSince1970: ts)
+        radiusMeters = snapshot.radiusMeters
+        postCount    = snapshot.postCount
+        updatedAt    = Date(timeIntervalSince1970: snapshot.updatedAt)
         d.set(radiusMeters, forKey: radiusKey)
         d.set(postCount,    forKey: postKey)
-        d.set(ts,           forKey: updatedKey)
+        d.set(snapshot.updatedAt, forKey: updatedKey)
         recomputeTrend()
+    }
+
+    func refresh() {
+        guard WCSession.isSupported() else { return }
+        let session = WCSession.default
+        // A context delivered before this process activated is not replayed as
+        // a delegate callback. Consume the persisted value, then ask the phone.
+        apply(session.receivedApplicationContext)
+        guard session.activationState == .activated, session.isReachable else { return }
+        session.sendMessage(["request": "radiusSnapshot"], replyHandler: { [weak self] payload in
+            Task { @MainActor in self?.apply(payload) }
+        }, errorHandler: { error in
+            print("[WatchRadiusStore] Radius refresh pending: \(error.localizedDescription)")
+        })
     }
 
     private func configureSession() {
@@ -902,38 +914,17 @@ final class WatchRadiusStore: NSObject, ObservableObject {
         WCSession.default.activate()
     }
 
-    private static func dbl(_ key: String, _ p: [String: Any]) -> Double? {
-        if let v = p[key] as? Double   { return v }
-        if let v = p[key] as? Int      { return Double(v) }
-        if let v = p[key] as? NSNumber { return v.doubleValue }
-        if let v = p[key] as? String   { return Double(v) }
-        return nil
-    }
-
-    private static func int(_ key: String, _ p: [String: Any]) -> Int? {
-        func clampToInt(_ value: Double) -> Int? {
-            guard value.isFinite else { return nil }
-            if value >= Double(Int.max) { return Int.max }
-            if value <= Double(Int.min) { return Int.min }
-            return Int(value)
-        }
-
-        if let v = p[key] as? Int { return v }
-        if let v = p[key] as? NSNumber { return v.intValue }
-        if let v = p[key] as? Double { return clampToInt(v) }
-        if let v = p[key] as? String {
-            // Try Double first to handle very large magnitudes, then clamp
-            if let dv = Double(v) { return clampToInt(dv) }
-            // Fallback: if it's a normal-sized integer string, parse directly
-            if let iv = Int(v) { return iv }
-            return nil
-        }
-        return nil
-    }
 }
 
 extension WatchRadiusStore: WCSessionDelegate {
-    nonisolated func session(_ session: WCSession, activationDidCompleteWith state: WCSessionActivationState, error: Error?) {}
+    nonisolated func session(_ session: WCSession, activationDidCompleteWith state: WCSessionActivationState, error: Error?) {
+        Task { @MainActor in self.refresh() }
+    }
+
+    nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
+        guard session.isReachable else { return }
+        Task { @MainActor in self.refresh() }
+    }
 
     nonisolated func session(_ session: WCSession, didReceiveApplicationContext context: [String: Any]) {
         Task { @MainActor in self.apply(context) }
