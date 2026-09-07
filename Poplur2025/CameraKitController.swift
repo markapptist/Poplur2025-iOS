@@ -1629,6 +1629,17 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
 
     @MainActor
     private func applyCapturePerformance(policy: PoplurPerformancePolicy, granted: Bool) {
+        // The tripwire remains latched through fair, so observing only its
+        // Boolean edge stranded a preview parked at serious until nominal.
+        // Every policy transition re-evaluates whether an explicit resume is
+        // now permitted. Keep the sensor off until the user asks to reopen it.
+        if isColdBudgetParked, latestColdBudgetUpdate.reason == .thermal {
+            publishColdBudgetState(
+                state: .parked,
+                reason: .thermal,
+                canResume: !requiresEmergencyThermalPark
+            )
+        }
         if !granted,
            performanceWantsCapture,
            requiresEmergencyThermalPark,

@@ -499,7 +499,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
               let data = try? JSONSerialization.data(withJSONObject: payload),
               let json = String(data: data, encoding: .utf8) else { return }
         webView.evaluateJavaScript(
-            "window.dispatchEvent(new CustomEvent('poplur-camera-budget', { detail: \(json) })); true;"
+            "window.__poplurCameraBudget = \(json); window.dispatchEvent(new CustomEvent('poplur-camera-budget', { detail: window.__poplurCameraBudget })); true;"
         ) { _, _ in
             guard update.state == .parked else { return }
             // Deliver the parked state first so React paints the retained-frame
