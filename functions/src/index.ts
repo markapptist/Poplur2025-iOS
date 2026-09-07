@@ -2088,3 +2088,5 @@ function sendError(res: Response, status: number, code: string, message: string)
     },
   });
 }
+
+export { syntheticDailySimulation } from "./syntheticDailySimulation";

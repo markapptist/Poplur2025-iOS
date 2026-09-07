@@ -622,7 +622,8 @@ async function ingestRunnerEvent(
       cohortId: SYNTHETIC_BETA_COHORT_ID,
     };
 
-    const shouldPublishMapPost = request.type === "event"
+    const shouldPublishMapPost = configSnapshot.data()?.legacyMapPostSeeding === true
+      && request.type === "event"
       && request.screen === "map"
       && request.action === "open-map";
     const mapPostRef = shouldPublishMapPost

@@ -558,6 +558,10 @@ service cloud.firestore {
       // Engagements on a post. Creating one is what causes its owner to be
       // notified, so these rules are the boundary that stops a client paging
       // somebody on someone else's behalf.
+      match /comments/{commentId} {
+        allow read: if true;
+        allow write: if false;
+      }
       match /engagements/{engagementId} {
         // Readable by the post's owner (their notification history) and by the
         // actor (so a client can tell whether it already liked this post).

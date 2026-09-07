@@ -38,16 +38,19 @@ export const radiusDecay = onSchedule(
     const nowTimestamp = Timestamp.fromMillis(nowMillis);
     let decayed = 0;
     let stamped = 0;
-    // Two range queries because legacy posts may carry only radius/radiusMeters
+    // Paged range queries because legacy posts may carry only radius/radiusMeters
     // with no organicRadiusMeters field; the per-post transaction re-reads, so
-    // overlap between the two result sets is harmless.
-    const [organicSnapshot, legacySnapshot] = await Promise.all([
-      db.collection("posts").where("organicRadiusMeters", ">", 0).limit(2_000).get(),
-      db.collection("posts").where("radiusMeters", ">", 0).limit(2_000).get(),
-    ]);
+    // overlap between the result sets is harmless.
     const references = new Map<string, admin.firestore.DocumentReference>();
-    for (const doc of [...organicSnapshot.docs, ...legacySnapshot.docs]) {
-      references.set(doc.ref.path, doc.ref);
+    for (const field of ["organicRadiusMeters", "radiusMeters", "radius"]) {
+      let cursor: admin.firestore.QueryDocumentSnapshot | undefined;
+      for (;;) {
+        const query = db.collection("posts").where(field, ">", 0).orderBy(field).limit(500);
+        const page = await (cursor ? query.startAfter(cursor) : query).get();
+        for (const doc of page.docs) references.set(doc.ref.path, doc.ref);
+        if (page.size < 500) break;
+        cursor = page.docs[page.docs.length - 1];
+      }
     }
     for (const ref of references.values()) {
       await db.runTransaction(async transaction => {

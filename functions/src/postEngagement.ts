@@ -69,10 +69,15 @@ export const recordPostEngagement = onCall(
   async request => {
     const uid = request.auth?.uid;
     if (!uid) throw new HttpsError("unauthenticated", "Sign in to react to a post.");
+    return applyPostEngagement(uid, request.data);
+  },
+);
 
+/** Shared transaction for authenticated app traffic and labelled scheduled testers. */
+export async function applyPostEngagement(uid: string, data: unknown) {
     let input;
     try {
-      input = parsePostEngagementInput(request.data);
+      input = parsePostEngagementInput(data);
     } catch (error) {
       if (error instanceof PostEngagementValidationError) {
         throw new HttpsError("invalid-argument", error.message);
@@ -214,6 +219,13 @@ export const recordPostEngagement = onCall(
           updatedAt: FieldValue.serverTimestamp(),
         }, { merge: true });
       }
+      if (input.kind === "comment" && input.text) {
+        transaction.create(postRef.collection("comments").doc(eventRef.id), {
+          actorUid: uid, handle: actorHandle(actorSnapshot.data() ?? {}), text: input.text,
+          synthetic: actorSnapshot.data()?.syntheticBeta === true,
+          createdAt: FieldValue.serverTimestamp(),
+        });
+      }
       transaction.create(eventRef, {
         actorUid: uid,
         actorHandle: actorHandle(actorSnapshot.data() ?? {}),
@@ -227,5 +239,4 @@ export const recordPostEngagement = onCall(
       });
       return { ...result, duplicate: false };
     });
-  },
-);
+}

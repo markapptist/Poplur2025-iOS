@@ -33,12 +33,13 @@ export const RADIUS_DECAY_FLOOR_METERS = 10;
 
 const POST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 const EVENT_ID_PATTERN = /^[A-Za-z0-9._:-]{16,128}$/;
-const ALLOWED_INPUT_KEYS = new Set(["postId", "eventId", "kind"]);
+const ALLOWED_INPUT_KEYS = new Set(["postId", "eventId", "kind", "text"]);
 
 export interface PostEngagementInput {
   postId: string;
   eventId: string;
   kind: PostEngagementKind;
+  text?: string;
 }
 
 export interface PostEngagementCounters {
@@ -191,8 +192,8 @@ function plainObject(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-/** The callable accepts no client-selected metrics or content. In particular,
- * comment text is deliberately absent: this slice records only the count. */
+/** The callable accepts validated comment text, but no client-selected metrics.
+ * Counters and radius grants are calculated in the production transaction. */
 export function parsePostEngagementInput(value: unknown): PostEngagementInput {
   const row = plainObject(value);
   if (!row || Object.keys(row).some(key => !ALLOWED_INPUT_KEYS.has(key))) {
@@ -210,7 +211,10 @@ export function parsePostEngagementInput(value: unknown): PostEngagementInput {
   if (!(POST_ENGAGEMENT_KINDS as readonly string[]).includes(kind)) {
     throw new PostEngagementValidationError("Unsupported engagement kind.");
   }
-  return { postId, eventId, kind: kind as PostEngagementKind };
+  if (row.text !== undefined && (kind !== "comment" || typeof row.text !== "string" || !row.text.trim() || row.text.length > 500)) {
+    throw new PostEngagementValidationError("Comment text must contain 1–500 characters and belong to a comment.");
+  }
+  return { postId, eventId, kind: kind as PostEngagementKind, ...(typeof row.text === "string" ? { text: row.text.trim() } : {}) };
 }
 
 /** Firestore ids never contain the caller's UID/event text directly. The hash

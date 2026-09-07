@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.recordPostEngagement = void 0;
+exports.applyPostEngagement = applyPostEngagement;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-admin/firestore");
 const https_1 = require("firebase-functions/v2/https");
@@ -82,9 +83,13 @@ exports.recordPostEngagement = (0, https_1.onCall)({ region, timeoutSeconds: 15,
     const uid = request.auth?.uid;
     if (!uid)
         throw new https_1.HttpsError("unauthenticated", "Sign in to react to a post.");
+    return applyPostEngagement(uid, request.data);
+});
+/** Shared transaction for authenticated app traffic and labelled scheduled testers. */
+async function applyPostEngagement(uid, data) {
     let input;
     try {
-        input = (0, postEngagementPolicy_1.parsePostEngagementInput)(request.data);
+        input = (0, postEngagementPolicy_1.parsePostEngagementInput)(data);
     }
     catch (error) {
         if (error instanceof postEngagementPolicy_1.PostEngagementValidationError) {
@@ -208,6 +213,13 @@ exports.recordPostEngagement = (0, https_1.onCall)({ region, timeoutSeconds: 15,
                 updatedAt: firestore_1.FieldValue.serverTimestamp(),
             }, { merge: true });
         }
+        if (input.kind === "comment" && input.text) {
+            transaction.create(postRef.collection("comments").doc(eventRef.id), {
+                actorUid: uid, handle: actorHandle(actorSnapshot.data() ?? {}), text: input.text,
+                synthetic: actorSnapshot.data()?.syntheticBeta === true,
+                createdAt: firestore_1.FieldValue.serverTimestamp(),
+            });
+        }
         transaction.create(eventRef, {
             actorUid: uid,
             actorHandle: actorHandle(actorSnapshot.data() ?? {}),
@@ -221,4 +233,4 @@ exports.recordPostEngagement = (0, https_1.onCall)({ region, timeoutSeconds: 15,
         });
         return { ...result, duplicate: false };
     });
-});
+}
