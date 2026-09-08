@@ -2,7 +2,11 @@
   "baseUrl": "https://storage.googleapis.com/poplur2025-assets/asset-packs",
   "localPaths": {
     "arcade-art": "games/arcade/art",
-    "ar-filters": "ar-filters"
+    "ar-filters": "ar-filters",
+    "subscreens": "subscreens",
+    "profile-themes": "profile-themes",
+    "feed": "feed",
+    "channels": "channels"
   },
   "packs": [
     {
