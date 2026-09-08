@@ -2132,7 +2132,9 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                         )
                     }
                     if shouldPresent && currentWebTab == "feed" {
-                        DispatchQueue.main.async {
+                        DispatchQueue.main.async { [weak self] in
+                            guard self?.currentWebTab == "feed" else { return }
+                            PoplurDiagLog.append("[Ads] eligible Feed transition")
                             AdManager.shared.presentInterstitialOverKeyWindow()
                         }
                     }

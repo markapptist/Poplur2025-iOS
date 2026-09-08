@@ -6,6 +6,8 @@ final class AdManager: NSObject, FullScreenContentDelegate {
     static let feedAdVisibilityNotification = Notification.Name("PoplurFeedAdVisibility")
     
     private var interstitial: InterstitialAd?
+    // Retain a presented ad until its delegate reports dismissal or failure.
+    private var presentingAd: InterstitialAd?
     private var isLoading = false
     private var retryWorkItem: DispatchWorkItem?
     private var retryAttempt = 0
@@ -44,9 +46,11 @@ final class AdManager: NSObject, FullScreenContentDelegate {
             return
         }
         hasStarted = true
+        PoplurDiagLog.append("[Ads] SDK starting with configured production unit")
         MobileAds.shared.start { [weak self] _ in
             DispatchQueue.main.async {
                 self?.sdkReady = true
+                PoplurDiagLog.append("[Ads] SDK ready")
                 self?.loadInterstitial()
             }
         }
@@ -57,6 +61,7 @@ final class AdManager: NSObject, FullScreenContentDelegate {
         retryWorkItem?.cancel()
         retryWorkItem = nil
         isLoading = true
+        PoplurDiagLog.append("[Ads] requesting interstitial")
         let request = Request()
         InterstitialAd.load(with: interstitialUnitID, request: request) { [weak self] ad, error in
             guard let self = self else { return }
@@ -66,6 +71,7 @@ final class AdManager: NSObject, FullScreenContentDelegate {
                 self.cancelPendingPresentation()
                 let failure = error! as NSError
                 NSLog("[Ads] load failed domain=%@ code=%ld: %@", failure.domain, failure.code, failure.localizedDescription)
+                PoplurDiagLog.append("[Ads] load failed domain=\(failure.domain) code=\(failure.code): \(failure.localizedDescription)")
                 self.scheduleRetry()
                 return
             }
@@ -74,6 +80,7 @@ final class AdManager: NSObject, FullScreenContentDelegate {
             self.loadedAt = Date()
             self.retryAttempt = 0
             NSLog("[Ads] interstitial ready")
+            PoplurDiagLog.append("[Ads] interstitial ready")
             // The feed is paused for at most two seconds at an eligible break.
             // After that lease, retain the ad for the NEXT natural transition.
             if let presenter = self.pendingPresenter {
@@ -104,6 +111,7 @@ final class AdManager: NSObject, FullScreenContentDelegate {
                 loadInterstitial()
                 return
             }
+            presentingAd = ad
             interstitial = nil
             pendingExpiry?.cancel()
             pendingExpiry = nil
@@ -111,6 +119,7 @@ final class AdManager: NSObject, FullScreenContentDelegate {
             isPresenting = true
             ad.fullScreenContentDelegate = self
             publishFeedAdVisibility(true)
+            PoplurDiagLog.append("[Ads] presenting at Feed transition")
             ad.present(from: presenter)
         } else {
             if pendingPresenter == nil {
@@ -160,6 +169,7 @@ final class AdManager: NSObject, FullScreenContentDelegate {
 
     func adDidRecordImpression(_ ad: FullScreenPresentingAd) {
         NSLog("[Ads] interstitial impression recorded")
+        PoplurDiagLog.append("[Ads] interstitial impression recorded")
     }
 
     /// The web home has no view controller of its own to present from — find
@@ -180,6 +190,8 @@ final class AdManager: NSObject, FullScreenContentDelegate {
     // MARK: - GADFullScreenContentDelegate
     
     func adDidDismissFullScreenContent(_ ad: FullScreenPresentingAd) {
+        presentingAd = nil
+        PoplurDiagLog.append("[Ads] interstitial dismissed")
         isPresenting = false
         publishFeedAdVisibility(false)
         interstitial = nil
@@ -187,6 +199,8 @@ final class AdManager: NSObject, FullScreenContentDelegate {
     }
     
     func ad(_ ad: FullScreenPresentingAd, didFailToPresentFullScreenContentWithError error: Error) {
+        presentingAd = nil
+        PoplurDiagLog.append("[Ads] presentation failed: \(error.localizedDescription)")
         isPresenting = false
         NSLog("[Ads] presentation failed: %@", error.localizedDescription)
         publishFeedAdVisibility(false)

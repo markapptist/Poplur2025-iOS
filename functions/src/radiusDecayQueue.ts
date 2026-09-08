@@ -13,7 +13,7 @@ const db=admin.firestore(), region='us-central1';
 export const decayShard=(id:string)=>parseInt(createHash('sha256').update(id).digest('hex').slice(0,4),16)%256;
 export function needsDecay(post: admin.firestore.DocumentData, now=Date.now()) {
   const parts=postRadiusParts(post,now);
-  return post.visibilityStatus !== 'expired' && (parts.organic > 0 || parts.seed > 0);
+  return post.visibilityStatus !== 'expired' && (parts.organic > 0 || parts.seed > 0 || parts.boost > 0);
 }
 export async function reconcileDecayPost(postId:string) {
   await db.runTransaction(async tx=>{

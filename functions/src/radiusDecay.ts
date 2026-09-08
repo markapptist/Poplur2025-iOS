@@ -19,9 +19,8 @@ const db = admin.firestore();
 /**
  * Radius is a score you defend, not a stat you keep: organic radius halves in
  * ~13.5 days untouched (RADIUS_DECAY_PER_DAY, elapsed-time based so missed
- * runs catch up). Boost never decays here — it is paid product with its own
- * boostExpiresAt. Feed reach labels snapshot at delivery and are unaffected;
- * only the live delivery gate shrinks.
+ * runs catch up). The 5x all-user trial includes legacy demo reach stored
+ * in the boost component, starting at its explicit activation time.
  *
  * The decay clock is `decayedAt`, written ONLY here: a post without one gets
  * a baseline stamp and no decay, so decay accrues purely between server
@@ -68,7 +67,7 @@ export async function runRadiusDecay(nowMillis = Date.now(), dueReferences?: adm
         // Retries see a future deadline and cannot debit the same hour twice.
         if (dueReferences) {
           const parts = postRadiusParts(post, nowMillis);
-          if (parts.organic <= 0 && parts.seed <= 0) {
+          if (parts.organic <= 0 && parts.seed <= 0 && parts.boost <= 0) {
             transaction.delete(queueRef); return;
           }
           transaction.update(queueRef, { dueAt: Timestamp.fromMillis(nowMillis + 3600_000) });
@@ -79,13 +78,14 @@ export async function runRadiusDecay(nowMillis = Date.now(), dueReferences?: adm
           return;
         }
         const ownerUid = postOwnerUid(post);
-        const trial = decayTrial.data()?.enabled === true ? decayTrial.data() as { multiplier: number; effectiveAtMillis: number } : undefined;
+        const trial = decayTrial.data()?.enabled === true ? decayTrial.data() as { multiplier: number; effectiveAtMillis: number; boostedEffectiveAtMillis?: number } : undefined;
         const stressDecay = stressEnabled && !trial ? calculateSyntheticRetentionDecay(post, nowMillis) : null;
         const next = stressDecay ?? calculateRadiusDecay(post, nowMillis, undefined, trial);
         if (!next) return;
         const before = postRadiusParts(post, nowMillis);
         transaction.update(ref, {
           organicRadiusMeters: next.organicRadiusMeters,
+          ...('boostedRadiusMeters' in next ? { boostedRadiusMeters: next.boostedRadiusMeters } : {}),
           ...(next.seedRadiusMeters != null ? { seedRadiusMeters: next.seedRadiusMeters } : {}),
           ...(next.radiusMeters <= 0 ? { visibilityStatus: "expired", expiredAt: nowTimestamp, expiryReason: "radius-zero" } : {}),
           radiusMeters: next.radiusMeters,
@@ -116,7 +116,7 @@ export async function runRadiusDecay(nowMillis = Date.now(), dueReferences?: adm
             previous: { radiusMeters: before.stored ?? before.total, organicRadiusMeters: before.organic },
             next,
             seedRadiusMeters: next.seedRadiusMeters ?? before.seed,
-            boostedRadiusMeters: before.boost,
+            boostedRadiusMeters: 'boostedRadiusMeters' in next ? next.boostedRadiusMeters as number : before.boost,
           })),
         );
         if (stressDecay) {

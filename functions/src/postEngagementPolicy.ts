@@ -348,18 +348,21 @@ function radiusDelta(
  * no organic radius, no decayedAt baseline yet (the scheduler stamps one
  * without decaying — decay accrues only from a server-written baseline),
  * less than a minute elapsed, or rounding produced no change. The clock is
- * post.decayedAt, server-owned; boost never decays and is re-added on top.
+ * post.decayedAt, server-owned. The all-user trial also decays legacy seeded
+ * boost components from its explicit activation time, without retroactive loss.
  */
 export function calculateRadiusDecay(
   post: Record<string, unknown>,
   nowMillis: number,
   ratePerDay = RADIUS_DECAY_PER_DAY,
-  trial?: { multiplier: number; effectiveAtMillis: number },
-): { organicRadiusMeters: number; seedRadiusMeters?: number; radiusMeters: number } | null {
+  trial?: { multiplier: number; effectiveAtMillis: number; boostedEffectiveAtMillis?: number },
+): { organicRadiusMeters: number; seedRadiusMeters?: number; boostedRadiusMeters?: number; radiusMeters: number } | null {
   if (trial && (!Number.isFinite(trial.multiplier) || trial.multiplier < 1 || trial.multiplier > 10
     || !Number.isFinite(trial.effectiveAtMillis))) trial = undefined;
   const radius = currentRadius(post, nowMillis);
-  if (radius.organic <= 0 && !(trial && radius.seed > 0)) return null;
+  const decayBoost = trial && Number.isFinite(trial.boostedEffectiveAtMillis)
+    && nowMillis >= trial.boostedEffectiveAtMillis!;
+  if (radius.organic <= 0 && !(trial && radius.seed > 0) && !(decayBoost && radius.boost > 0)) return null;
   const decayedAtMillis = timestampMillis(post.decayedAt);
   if (decayedAtMillis == null) return null;
   const elapsedMs = nowMillis - decayedAtMillis;
@@ -376,13 +379,17 @@ export function calculateRadiusDecay(
   const seedFactor = Math.pow(1 - ratePerDay, trialElapsedMs * multiplier / 86_400_000);
   let seed = trial ? Math.floor(radius.seed * seedFactor) : radius.seed;
   if (trial && seed < RADIUS_DECAY_FLOOR_METERS) seed = 0;
-  if (organic >= radius.organic && seed >= radius.seed) return null;
+  const boostElapsedMs = decayBoost ? Math.max(0, nowMillis - Math.max(decayedAtMillis, trial!.boostedEffectiveAtMillis!)) : 0;
+  let boost = decayBoost ? Math.floor(radius.boost * Math.pow(1 - ratePerDay, boostElapsedMs * multiplier / 86_400_000)) : radius.boost;
+  if (decayBoost && boost < RADIUS_DECAY_FLOOR_METERS) boost = 0;
+  if (organic >= radius.organic && seed >= radius.seed && boost >= radius.boost) return null;
   // Keep the stored component sum exact. Outside the trial the seed is
   // preserved; active paid boosts retain their existing expiry policy.
   return {
     organicRadiusMeters: organic,
     ...(trial ? { seedRadiusMeters: seed } : {}),
-    radiusMeters: Math.min(MAX_POST_RADIUS_METERS, organic + radius.boost + seed),
+    ...(decayBoost ? { boostedRadiusMeters: boost } : {}),
+    radiusMeters: Math.min(MAX_POST_RADIUS_METERS, organic + boost + seed),
   };
 }
 

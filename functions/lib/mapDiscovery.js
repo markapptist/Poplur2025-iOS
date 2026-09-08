@@ -358,6 +358,33 @@ async function readSummaryTiles(refs) {
         }
     return refs.flatMap(ref => summaryCache.get(ref.path)?.candidates || []);
 }
+/** Only the recipient may replay an expired post from their own inbox. */
+async function notificationFocusFor(uid, raw) {
+    const id = raw?.notificationId;
+    if (typeof id !== 'string' || id.length > 500 || id.includes('/'))
+        return undefined;
+    const notice = (await db.doc(`users/${uid}/notifications/${id}`).get()).data();
+    if (!notice || !safeId(notice.postId))
+        return undefined;
+    const post = (await db.doc(`posts/${notice.postId}`).get()).data();
+    if (!post || ownerId(post) !== uid || !Number.isFinite(post.latitude) || !Number.isFinite(post.longitude))
+        return undefined;
+    const historyId = notice.historyId;
+    if (!safeId(historyId))
+        return undefined;
+    const history = (await db.doc(`posts/${notice.postId}/radiusHistory/${historyId}`).get()).data();
+    if (!history || !Number.isFinite(history.delta) || !Number.isFinite(history.radiusMeters))
+        return undefined;
+    const colors = { red: '#fb7185', purple: '#c084fc', blue: '#7dd3fc', green: '#4ade80', orange: '#ffbd66' };
+    const color = typeof post.pinColor === 'string' ? colors[post.pinColor] ?? post.pinColor : '';
+    const boundedKm = (meters) => Math.min(6371000, Math.max(0, meters)) / 1000;
+    return { notificationId: id, id: `firestore:${notice.postId}`, coords: [post.longitude, post.latitude],
+        name: String(post.username || post.handle || post.displayName || 'Your post').slice(0, 180),
+        beforeKm: boundedKm(history.radiusMeters - history.delta),
+        afterKm: boundedKm(history.radiusMeters),
+        currentKm: boundedKm(Number(post.radiusMeters ?? post.radius) || 0),
+        color: /^#[\da-f]{6}$/i.test(color) ? color : '#f53c99' };
+}
 async function runMapDiscoveryQuery(uid, raw) {
     let input;
     try {
@@ -414,7 +441,8 @@ async function runMapDiscoveryQuery(uid, raw) {
     if (mode === 'posts')
         for (const post of posts)
             post.competition.status = 'local';
-    return { schema: mapDiscoveryPolicy_1.MAP_SCHEMA, enabled: true, mode, posts, cells: cellShapes, nextCursor,
+    const notificationFocus = await notificationFocusFor(uid, raw);
+    return { ...(notificationFocus ? { notificationFocus } : {}), schema: mapDiscoveryPolicy_1.MAP_SCHEMA, enabled: true, mode, posts, cells: cellShapes, nextCursor,
         refreshAfterSeconds: 60, generatedAtMillis: Date.now(), limits: { features: mapDiscoveryPolicy_1.MAX_MAP_FEATURES, page: mapDiscoveryPolicy_1.MAP_PAGE_SIZE, richPins: 36 } };
 }
 exports.queryMapDiscovery = (0, https_1.onCall)({ region, timeoutSeconds: 30, memory: '512MiB', cpu: 1, concurrency: 40, maxInstances: 4 }, async (request) => {

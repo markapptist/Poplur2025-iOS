@@ -22,3 +22,14 @@ assert.equal(expired.seedRadiusMeters, 0);
 assert.match(radiusLossNotification({ cause: 'decay', delta: -100, radiusMeters: 0 }).body, /decreased 0.1 km.*expired/);
 for (const entry of [{cause:'like',delta:-100}, {cause:'decay',delta:0}, {cause:'decay',delta:NaN}]) assert.equal(radiusLossNotification(entry), null);
 console.log('Radius trial: exact 5x time, activation boundary, seed-only decay, zero expiry and loss notification checks passed');
+
+// Legacy demo provisioning wrote reach into the boost component without a purchase.
+const legacy = { organicRadiusMeters: 0, boostedRadiusMeters: 6371000, radiusMeters: 6371000, decayedAt: { toMillis: () => start } };
+const allComponents = { ...trial, boostedEffectiveAtMillis: start + day };
+assert.equal(calculateRadiusDecay(legacy, start + day, undefined, allComponents), null);
+const legacyNext = calculateRadiusDecay(legacy, start + 2 * day, undefined, allComponents);
+assert.equal(legacyNext.boostedRadiusMeters, Math.floor(6371000 * .95 ** 5));
+assert.equal(legacyNext.radiusMeters, legacyNext.boostedRadiusMeters);
+assert.equal(calculateRadiusDecay(legacy, start + 100 * day, undefined, allComponents).radiusMeters, 0);
+assert.equal(calculateRadiusDecay(legacy, start + 2 * day, undefined, trial), null);
+console.log('Legacy seeded reach: explicit activation, exact 5x decay, and zero expiry passed');
