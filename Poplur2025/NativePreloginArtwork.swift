@@ -77,21 +77,10 @@ struct NativePreloginCube: UIViewRepresentable {
 
 @MainActor
 enum NativePreloginThumbnails {
-    private static var cache: [String: UIImage] = [:]
     static func image(_ name: String) -> UIImage? {
-        if let image = cache[name] { return image }
-        guard let url = RuntimeGLBLoader.bundledURL(named: name, candidateSubdirectories: ["", "PreloginWeb/media", "ClayMapWeb", "Models", "SignupModels"]), let loaded = RuntimeGLBLoader.loadScene(from: url, label: "NativePreloginThumbnail") else { return nil }
-        let scene = SCNScene(); let content = SCNNode()
-        for node in loaded.rootNode.childNodes { content.addChildNode(node.clone()) }
-        RuntimeGLBLoader.normalize(content, targetExtent: 1.55)
-        content.eulerAngles = SCNVector3(-0.12, name == "zoom_buildings" ? -0.55 : 0.2, 0)
-        scene.rootNode.addChildNode(content)
-        let camera = SCNNode(); camera.camera = SCNCamera(); camera.camera?.fieldOfView = 35; camera.position = SCNVector3(0, 0, 3.2); scene.rootNode.addChildNode(camera)
-        let light = SCNNode(); light.light = SCNLight(); light.light?.type = .ambient; light.light?.intensity = 520; scene.rootNode.addChildNode(light)
-        let renderer = SCNRenderer(device: nil, options: nil); renderer.scene = scene; renderer.pointOfView = camera; renderer.autoenablesDefaultLighting = true
-        let image = renderer.snapshot(atTime: 0, with: CGSize(width: 240, height: 240), antialiasingMode: .multisampling4X)
-        renderer.scene = nil; cache[name] = image
-        return image
+        // These cards were already still images. Render the original clay models
+        // at build time so opening a form never decodes web-only GLB extensions.
+        UIImage(named: "NativePrelogin-\(name)")
     }
 }
 
