@@ -521,6 +521,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
     @MainActor
     static func setApplicationActive(_ active: Bool) {
         guard let webView = liveWebView else { return }
+        liveCoordinator?.setFeedApplicationActive(active, into: webView)
         let activeLiteral = active ? "true" : "false"
         // WKWebView can miss pageshow after an app foreground cycle. Replaying it
         // lets the web runtime resume its own animation and media scheduling too.
@@ -826,6 +827,10 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         /// The account's own posts, fetched once per arm on their own task and merged into every
         /// forward without delaying it. See deliverFeedPosts.
         fileprivate var ownFeedDocuments: [QueryDocumentSnapshot] = []
+        private var latestFeedDocuments: [QueryDocumentSnapshot]?
+        private var feedSubscriptionsGeneration = 0
+        private var feedRequested = false
+        private var feedApplicationPaused = false
         fileprivate var ownFeedDocumentsUid: String?
         /// Snapshot sequence, so a slow older forward never lands after a newer one.
         private var feedPostsSequence = 0
@@ -2903,16 +2908,21 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         /// Bundled creatives remain a browser-preview fallback, not a substitute
         /// for authenticated Firestore posts inside the app.
         private func deliverFeedPosts(into webView: WKWebView) {
-            guard Auth.auth().currentUser != nil else {
+            feedRequested = true
+            guard !feedApplicationPaused else { return }
+            guard let uid = Auth.auth().currentUser?.uid else {
+                suspendFeedSubscriptions()
+                ownFeedDocumentsUid = nil
+                ownFeedDocuments = []
+                latestFeedDocuments = nil
                 os_log("[feedRelay] no signed-in user; not forwarding", log: .default, type: .error)
                 return
             }
-            os_log("[feedRelay] arming feed listener", log: .default, type: .error)
             // Live, not one-shot. Inside the shell the Map is fed ONLY by this
             // forward — its own Firestore client never runs on device — so a
             // single getDocuments() meant a post published after launch never
             // reached the phone's map until the next cold start. A listener
-            // re-forwards on every change; a repeat request simply re-arms it.
+            // re-forwards on every change; a repeat request reuses its snapshot.
             // The newest 96 alone lose this account's own posts once the board
             // outpaces them — and the Profile's map button, the Map's own claims
             // and the Feed all read this forward. Fetch what this account wrote,
@@ -2920,16 +2930,21 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             // merges the cache synchronously, so its timing never changes (an
             // await in the forward let the sequence guard drop every forward
             // while the board kept moving — the phone showed an empty map).
-            // When the cache first fills, re-arm once so the next forward carries it.
-            if let uid = Auth.auth().currentUser?.uid, ownFeedDocumentsUid != uid {
+            // Each stream reuses the other snapshot; updates never re-arm a query.
+            if ownFeedDocumentsUid != uid {
+                suspendFeedSubscriptions()
+                latestFeedDocuments = nil
                 ownFeedDocumentsUid = uid
                 ownFeedDocuments = []
-                ownFeedRegistration?.remove()
+            }
+            let generation = feedSubscriptionsGeneration
+            if ownFeedRegistration == nil {
                 ownFeedRegistration = Firestore.firestore()
                     .collection("posts").whereField("userID", isEqualTo: uid)
                     .addSnapshotListener { [weak self, weak webView] snapshot, _ in
                         guard let self, let webView, let snapshot,
-                              self.ownFeedDocumentsUid == uid else { return }
+                              self.ownFeedDocumentsUid == uid,
+                              self.feedSubscriptionsGeneration == generation else { return }
                         self.ownFeedDocuments = snapshot.documents
                         let totals = snapshot.documents.reduce(into: (earned: 0.0, reach: 0.0)) { totals, document in
                             let data = document.data()
@@ -2947,10 +2962,13 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                            let json = String(data: encoded, encoding: .utf8) {
                             webView.evaluateJavaScript("window.dispatchEvent(new CustomEvent('poplur-native-account-radius', {detail: \(json)}));true;", completionHandler: nil)
                         }
-                        self.deliverFeedPosts(into: webView)
+                        self.forwardFeedPosts(into: webView)
                     }
             }
-            feedPostsRegistration?.remove()
+            if feedPostsRegistration != nil {
+                forwardFeedPosts(into: webView)
+                return
+            }
             feedPostsRegistration = Firestore.firestore()
                 .collection("posts")
                 .order(by: "createdAt", descending: true)
@@ -2960,12 +2978,25 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     // webView capture here would pin the web view, whose user
                     // content controller pins this coordinator — a cycle that
                     // keeps deinit (and this remove) from ever running.
-                    guard let self, let webView else { return }
+                    guard let self, let webView, self.ownFeedDocumentsUid == uid,
+                          self.feedSubscriptionsGeneration == generation else { return }
                     guard let snapshot else {
                         os_log("[feedRelay] listener failed: %{public}@", log: .default, type: .error, error?.localizedDescription ?? "unknown")
                         return
                     }
                     os_log("[feedRelay] listener fired: %d documents", log: .default, type: .error, snapshot.documents.count)
+                    self.latestFeedDocuments = snapshot.documents
+                    self.forwardFeedPosts(into: webView)
+                }
+        }
+
+        /// Reuse both live snapshots for Feed, Map and Profile requests. Keeping
+        /// this separate from subscription setup avoids a new 96-post read
+        /// whenever one of the account's posts receives an engagement update.
+        private func forwardFeedPosts(into webView: WKWebView) {
+                    guard !feedApplicationPaused,
+                          Auth.auth().currentUser?.uid == ownFeedDocumentsUid,
+                          let latest = latestFeedDocuments else { return }
                     self.feedPostsSequence += 1
                     let sequence = self.feedPostsSequence
                     Task {
@@ -2979,8 +3010,8 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                         return 0
                     }
 
-                    let seen = Set(snapshot.documents.map(\.documentID))
-                    let documents = snapshot.documents + self.ownFeedDocuments.filter { !seen.contains($0.documentID) }
+                    let seen = Set(latest.map(\.documentID))
+                    let documents = latest + self.ownFeedDocuments.filter { !seen.contains($0.documentID) }
                     let rows: [[String: Any]] = documents
                         .sorted { createdMillis($0.data()) > createdMillis($1.data()) }
                         .compactMap { document in
@@ -3127,7 +3158,24 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                         )
                     }
                     }
-                }
+        }
+
+        fileprivate func setFeedApplicationActive(_ active: Bool, into webView: WKWebView) {
+            feedApplicationPaused = !active
+            if active {
+                if feedRequested { deliverFeedPosts(into: webView) }
+            } else {
+                suspendFeedSubscriptions()
+            }
+        }
+
+        private func suspendFeedSubscriptions() {
+            feedSubscriptionsGeneration += 1
+            feedPostsSequence += 1
+            feedPostsRegistration?.remove()
+            ownFeedRegistration?.remove()
+            feedPostsRegistration = nil
+            ownFeedRegistration = nil
         }
 
         /// Fills in the handle for rows whose post document has none.
