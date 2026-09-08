@@ -205,7 +205,7 @@ struct BusinessProfile: Codable, Hashable {
             "proofSummary": proofSummary.trimmed,
             "requiresReverification": requiresReverification,
             "mapVisibility": true,
-            "markerType": "verified_business_profile"
+            "markerType": verificationStatus == .verified ? "verified_business_profile" : "business_profile"
         ]
         if let rejectionReason, !rejectionReason.trimmed.isEmpty {
             dict["rejectionReason"] = rejectionReason.trimmed
@@ -253,11 +253,14 @@ enum BusinessAccountService {
         guard let businessProfile else { return }
         var businessDocument = businessProfile.toDictionary()
         businessDocument["ownerUserID"] = uid
+        businessDocument["ownerUserId"] = uid
+        businessDocument.removeValue(forKey: "proofSummary")
+        businessDocument.removeValue(forKey: "rejectionReason")
         businessDocument["email"] = email.trimmed
         businessDocument["accountType"] = PoplurAccountType.business.rawValue
         businessDocument["updatedAt"] = FieldValue.serverTimestamp()
         businessDocument["submittedAt"] = FieldValue.serverTimestamp()
-        try await setData(businessDocument, at: db.collection("businessProfiles").document(uid), merge: true)
+        try await setData(businessDocument, at: db.collection("businesses").document(uid), merge: true)
     }
 
     static func updateBusinessProfile(uid: String, businessProfile: BusinessProfile) async throws {
@@ -282,7 +285,12 @@ enum BusinessAccountService {
         ]
 
         try await setData(userUpdates, at: db.collection("users").document(uid), merge: true)
-        try await setData(businessData, at: db.collection("businessProfiles").document(uid), merge: true)
+        // Ownership proof belongs in the private users document. The public
+        // business record uses the collection and owner key enforced by rules.
+        businessData["ownerUserId"] = uid
+        businessData.removeValue(forKey: "proofSummary")
+        businessData.removeValue(forKey: "rejectionReason")
+        try await setData(businessData, at: db.collection("businesses").document(uid), merge: true)
     }
 
     private static func setData(_ data: [String: Any], at document: DocumentReference, merge: Bool) async throws {

@@ -30,7 +30,7 @@ final class PreLoginMusicPlayer: ObservableObject {
 
     /// Starts (or resumes) looping playback. Safe to call repeatedly.
     func start() {
-        guard !ProcessInfo.processInfo.isRunningInPreviews else { return }
+        guard !ProcessInfo.processInfo.isRunningInPreviews, !isMuted else { return }
         if player != nil {
             applyMuteState()
             return
@@ -56,11 +56,9 @@ final class PreLoginMusicPlayer: ObservableObject {
     }
 
     private func applyMuteState() {
-        guard let player else { return }
-        if isMuted {
-            player.volume = 0
-            PoplurMapRadioHost.shared.stop()
-        } else {
+        if isMuted { stop(); return }
+        guard let player else { start(); return }
+        if !isMuted {
             player.volume = Self.playbackVolume
             player.play()
             if !PoplurMapRadioHost.shared.isLive {

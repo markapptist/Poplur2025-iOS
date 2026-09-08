@@ -597,6 +597,21 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         config.mediaTypesRequiringUserActionForPlayback = []
         config.userContentController.add(context.coordinator, name: "poplur")
         config.userContentController.add(context.coordinator, name: "homeReady")
+        // Transfer the native onboarding selection once per account. A marker
+        // prevents this initial value from overwriting later Profile settings.
+        if let uid = UserDefaults.standard.string(forKey: "poplur.nativeOnboarding.uid"),
+           uid == Auth.auth().currentUser?.uid,
+           let gender = UserDefaults.standard.string(forKey: "poplur.nativeOnboarding.gender"),
+           ["male", "female"].contains(gender),
+           let data = try? JSONSerialization.data(withJSONObject: ["uid": uid, "gender": gender]),
+           let payload = String(data: data, encoding: .utf8) {
+            config.userContentController.addUserScript(WKUserScript(source: """
+                (() => { try { const p = \(payload); if (localStorage.getItem('poplur.nativeOnboarding.uid') !== p.uid) {
+                  localStorage.setItem('poplur.profile.gender', p.gender);
+                  localStorage.setItem('poplur.nativeOnboarding.uid', p.uid);
+                } } catch (_) {} })();
+                """, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        }
         // Capture renderer exceptions in the existing bounded device log.
         // Install before the bundle executes so a React root failure is visible.
         config.userContentController.addUserScript(WKUserScript(

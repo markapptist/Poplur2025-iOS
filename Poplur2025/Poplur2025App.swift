@@ -79,14 +79,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             PoplurCardPurchaseService.shared.startObservingTransactions()
         }
 
-        // Defer ad SDK init to after first frame — MobileAds.shared.start() is synchronous
-        // and can block the main thread for 100–300 ms, delaying first render.
-        DispatchQueue.main.async {
-            #if !targetEnvironment(simulator)
-            AdManager.shared.start()
-            #endif
-        }
-
         Task { @MainActor in
             PoplurNotificationCenter.shared.configure()
             WatchRadiusSync.shared.start()
@@ -193,20 +185,11 @@ struct Poplur2025App: App {
     @State private var authTransitionEarliestFinish = Date.distantPast
     @Environment(\.scenePhase) private var scenePhase
 
-    /// Phase 1 web-embed migration: the pre-login flow (splash + welcome) is the
-    /// APPROVED web screens hosted in a WKWebView (`PreloginWebView`) rather than
-    /// native remakes. Flip to `false` to restore the native clay splash +
-    /// `WelcomeView` path — the migration is deliberately kept minimal and
-    /// reversible. When on: the native clay splash is neutralized (the web splash
-    /// shows instead) and the native pre-login music is silenced (the web splash
-    /// plays its own radio bed).
-    private let usePreloginWebEmbed = true
-
-    /// True only while WelcomeView (or its Login/Sign Up pushes) is the visible screen —
+    /// True only while the native signed-out flow is visible —
     /// not during the brief auth-resolving spinner, so returning signed-in users never hear
     /// a momentary blip of music before landing on HomeView.
     private var isPreLoginVisible: Bool {
-        !auth.isAuthenticated && !auth.isResolvingAuthState
+        !auth.canEnterHome && !auth.isResolvingAuthState
     }
 
     init() {
@@ -267,16 +250,6 @@ struct Poplur2025App: App {
                         .ignoresSafeArea()
                 }
             }
-            .overlay(alignment: .topLeading) {
-                // The web pre-login owns its own audio + mute affordance, so the
-                // native pre-login mute button is hidden while the web embed runs.
-                if isPreLoginVisible && !isWelcomePanelVisible && !usePreloginWebEmbed {
-                    PoplurMuteButton(music: preLoginMusic)
-                        .padding(.leading, 20)
-                        .padding(.top, 12)
-                        .transition(.opacity)
-                }
-            }
             #if DEBUG
             .overlay(alignment: .topTrailing) {
                 if ProcessInfo.processInfo.arguments.contains("-PoplurPerformanceOverlay") {
@@ -296,14 +269,14 @@ struct Poplur2025App: App {
                 auth.signOut()
             }
             .onChange(of: isPreLoginVisible) { _, isVisible in
-                if isVisible && !showSplash && !usePreloginWebEmbed {
+                if isVisible && !showSplash && scenePhase == .active {
                     preLoginMusic.start()
                 } else {
                     preLoginMusic.stop()
                 }
             }
             .onChange(of: showSplash) { _, splashing in
-                if !splashing && isPreLoginVisible && !usePreloginWebEmbed {
+                if !splashing && isPreLoginVisible && scenePhase == .active {
                     preLoginMusic.start()
                 }
             }
@@ -333,7 +306,7 @@ struct Poplur2025App: App {
                 case .active:
                     PoplurPerformanceManager.shared.setApplicationLifecycle(.active)
                     PoplurBackgroundResourceFence.shared.enterForeground()
-                    if isPreLoginVisible && !showSplash && !usePreloginWebEmbed {
+                    if isPreLoginVisible && !showSplash && scenePhase == .active {
                         preLoginMusic.start()
                     }
                 @unknown default:
@@ -341,7 +314,7 @@ struct Poplur2025App: App {
                 }
             }
             .onAppear {
-                if isPreLoginVisible && !showSplash && !usePreloginWebEmbed {
+                if isPreLoginVisible && !showSplash && scenePhase == .active {
                     preLoginMusic.start()
                 }
                 // Sample notification authorization early: the Home URL is
@@ -371,48 +344,14 @@ struct Poplur2025App: App {
                     for: .default
                 )
             }
-            .overlay {
-                // Phase 1: the native clay splash is neutralized — the APPROVED
-                // web splash (inside PreloginWebView) is the only intro now, so no
-                // native clay-intro plays before the web screens. Guarded by the
-                // flag so flipping it off restores the native splash overlay.
-                if showSplash && !usePreloginWebEmbed {
-                    PoplurClaySplashView {
-                        withAnimation(.easeOut(duration: 0.45)) {
-                            showSplash = false
-                        }
-                    }
-                    .environmentObject(auth)
-                    .ignoresSafeArea()
-                    .transition(.opacity)
-                    .zIndex(100)
-                }
-            }
+
         }
     }
 
     @ViewBuilder
     private var authenticatedContent: some View {
         ZStack {
-            if auth.isResolvingAuthState && !usePreloginWebEmbed {
-                // Returning users must see the same approved Clay splash while
-                // Firebase restores their session. A plain dark placeholder made
-                // physical-device cold launches diverge from the approved GCL slot.
-                //
-                // Behind the web embed this branch is SKIPPED, and that is the
-                // whole point: it hosts splash.html, and the pre-login embed
-                // below hosts splash.html too. Rendering both meant a signed-out
-                // launch played the approved splash twice — the first WebView
-                // was torn down mid-clip and a second one restarted the video
-                // from frame zero, cross-faded by the animation below, which
-                // read as two splashes. One surface now carries the whole wait:
-                // the pre-login embed mounts while auth is still resolving and
-                // its splash simply keeps looping (the video is `loop`) until
-                // there is something real to show.
-                PostLoginLoadingWebView()
-                    .ignoresSafeArea()
-                    .transition(.opacity)
-            } else if auth.isAuthenticated {
+            if auth.canEnterHome && !auth.isResolvingAuthState {
                 ZStack {
                     if PoplurWebHome.isEnabled {
                         // Phase 3: the APPROVED web home (poplur-clay-map ViewHarness
@@ -437,7 +376,7 @@ struct Poplur2025App: App {
                             // block touches at the warmed Home surface too. Without
                             // this guard, a splash tap can pass through and unlock
                             // Feed audio underneath, exposing system media controls.
-                            .allowsHitTesting(!showAuthTransition)
+                            .allowsHitTesting(!showAuthTransition && !showSplash)
                             // The custom volume meter is NATIVE, and it moved out from
                             // under us when the home became a web surface: HomeView
                             // carried PoplurVolumeBars, and Phase 3 replaced HomeView
@@ -461,78 +400,48 @@ struct Poplur2025App: App {
                     }
 
                     if showAuthTransition {
-                        // This is the exact approved splash used by the signed-out
-                        // flow. Keep one source of truth on every launch path: no
-                        // native remake and no alternate post-login loading page.
+                        // The same native video splash covers every auth handoff.
                         PostLoginLoadingWebView()
                             .ignoresSafeArea()
                             .transition(.opacity)
                             .zIndex(100)
                     }
                 }
-                .onAppear {
-                    // A restored Firebase session can resolve before SwiftUI
-                    // installs either onChange observer on a fast physical
-                    // device. The authenticated branch itself is the final
-                    // launch edge, so it guarantees the approved splash mounts
-                    // once even when that earlier state transition was missed.
-                    guard !auth.isResolvingAuthState, !showAuthTransition else { return }
-                    triggerAuthTransition()
-                }
                 .task(id: auth.currentUser?.uid) {
+                    // Pre-login does not need an ad WebView or an inventory preload.
+                    #if !targetEnvironment(simulator)
+                    AdManager.shared.start()
+                    #endif
                     await PoplurNotificationCenter.shared.refreshDailyNotificationForCurrentUser()
                     WatchRadiusSync.shared.refreshAndSendRadius()
                 }
-            } else if usePreloginWebEmbed {
-                // Phase 1/2: the approved web splash → welcome, hosted edge-to-edge
-                // in a WKWebView. Hands back to the post-login/home branch above
-                // when auth resolves (Firebase state listener flips isAuthenticated).
-                PreloginWebView(auth: auth, onComplete: {
-                    // Phase-2 completion handoff. The web flow's `complete` action
-                    // arrives here as the single native seam to the post-login path.
-                    // Entry into HomeView still requires auth.isAuthenticated, which
-                    // Phase 3 flips via real Firebase auth — so this does NOT fake a
-                    // signed-in state, it just marks the handoff point.
-                    print("[Poplur2025App] pre-login web flow reported complete — handing off to post-login path (Phase 3 gates real entry via auth state)")
-                })
-                    // .container rather than a bare ignoresSafeArea(): the bare form
-                    // ignores EVERY region including .keyboard, which switches off
-                    // SwiftUI's automatic keyboard avoidance. The web surface then keeps
-                    // its full-height frame while the keyboard sits on top of it, burying
-                    // whatever field has focus. Ignoring only the container keeps the
-                    // layout edge-to-edge under the status bar and home indicator, and
-                    // lets the keyboard shrink the frame so the page reflows above it —
-                    // every web screen, without per-screen work.
+            } else if !showSplash && !auth.isResolvingAuthState {
+                NativePreloginView()
                     .ignoresSafeArea(.container, edges: .all)
-                    // Pre-login volume: the web radio changes the system volume, so
-                    // suppress the iOS HUD (hidden MPVolumeView) and show the app's
-                    // custom PoplurVolumeBars instead — mirroring HomeView. The
-                    // deviceVolumeObserver env object is already injected app-level.
-                    // The bridge sits behind the WebView (hidden); volumeBarsOverlay
-                    // is a native overlay above the web content that ignores touches.
+                    .environmentObject(auth)
                     .overlay(SystemVolumeHUDSuppressor())
                     .volumeBarsOverlay()
                     .transition(.opacity)
-            } else {
-                WelcomeView()
-                    .environmentObject(auth)
-                    .volumeBarsOverlay()
-                    .transition(.opacity)
+            }
+            // A restored session warms Home beneath the one native intro.
+            // Waiting to create Home until the video ended left a blank load gap.
+            if showSplash || auth.isResolvingAuthState {
+                PoplurClaySplashView {
+                    withAnimation(.easeOut(duration: 0.3)) { showSplash = false }
+                }.environmentObject(auth).ignoresSafeArea().transition(.opacity).zIndex(200)
             }
         }
         .animation(.easeOut(duration: 0.3), value: auth.isResolvingAuthState)
         .animation(.easeOut(duration: 0.3), value: showAuthTransition)
-        // Explicit sign-IN and sign-UP both show the approved web Loading screen
-        // (clay globe) before the home reveals — the moments the user asked to
-        // cover. didSignUp is still cleared so it doesn't leak into later state.
-        .onChange(of: auth.isAuthenticated) { oldValue, newValue in
+        // Sign-in and completed signup share the native video splash while Home loads.
+        .onChange(of: auth.canEnterHome) { oldValue, newValue in
             guard newValue else {
                 authTransitionToken += 1
                 showAuthTransition = false
                 isAuthenticatedHomeReady = false
                 return
             }
-            guard !oldValue && !auth.isResolvingAuthState else { return }
+            guard !oldValue && !auth.isResolvingAuthState && !showSplash else { return }
             if auth.didSignUp { auth.didSignUp = false }
             triggerAuthTransition()
         }
@@ -540,7 +449,7 @@ struct Poplur2025App: App {
         // restoring state straight to authenticated (no isAuthenticated edge),
         // so show the same approved splash as signed-out launch.
         .onChange(of: auth.isResolvingAuthState) { _, resolving in
-            guard !resolving, auth.isAuthenticated, !showAuthTransition else { return }
+            guard !resolving, auth.canEnterHome, !showSplash, !showAuthTransition else { return }
             triggerAuthTransition()
         }
     }

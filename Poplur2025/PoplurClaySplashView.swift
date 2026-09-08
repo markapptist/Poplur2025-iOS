@@ -1,97 +1,70 @@
 import SwiftUI
-import UIKit
-import WebKit
+import AVFoundation
 
-/// Displays the approved Good Copy Splash without recreating its design in SwiftUI.
-/// The bundled HTML is a byte-for-byte copy of `good-copy-splash.html`; only its
-/// workspace asset URLs are resolved to the equivalent bundled app resources.
+/// Approved clay-world video and loading treatment, decoded by AVFoundation.
+/// This surface owns no browser process, JavaScript clock, or WebGL context.
 struct PoplurClaySplashView: View {
     @EnvironmentObject private var auth: AuthViewModel
-
     let onFinished: () -> Void
-
     var body: some View {
-        GoodCopySplashWebView()
-            .background(Color(red: 10 / 255, green: 7 / 255, blue: 9 / 255))
+        NativePreloginSplash()
             .task {
                 try? await Task.sleep(for: .milliseconds(3200))
-                while auth.isResolvingAuthState && !Task.isCancelled {
-                    try? await Task.sleep(for: .milliseconds(50))
-                }
+                while auth.isResolvingAuthState && !Task.isCancelled { try? await Task.sleep(for: .milliseconds(50)) }
                 guard !Task.isCancelled else { return }
                 onFinished()
             }
     }
 }
 
-private struct GoodCopySplashWebView: UIViewRepresentable {
-    func makeUIView(context: Context) -> WKWebView {
-        let configuration = WKWebViewConfiguration()
-        configuration.allowsInlineMediaPlayback = true
-        configuration.mediaTypesRequiringUserActionForPlayback = []
-
-        let webView = PoplurManagedWebView(
-            performanceName: "GoodCopySplashWeb",
-            priority: 220,
-            configuration: configuration
-        )
-        webView.isOpaque = false
-        webView.backgroundColor = UIColor(red: 10 / 255, green: 7 / 255, blue: 9 / 255, alpha: 1)
-        webView.scrollView.backgroundColor = webView.backgroundColor
-        webView.scrollView.contentInsetAdjustmentBehavior = .never
-        webView.scrollView.isScrollEnabled = false
-        webView.scrollView.bounces = false
-        webView.isUserInteractionEnabled = false
-
-        guard
-            let htmlURL = Bundle.main.url(forResource: "good-copy-splash", withExtension: "html"),
-            let approvedSource = try? String(contentsOf: htmlURL, encoding: .utf8)
-        else {
-            assertionFailure("Approved Good Copy Splash resource is missing")
-            return webView
-        }
-
-        // The clay-world video is INLINED, not referenced by filename.
-        //
-        // `loadHTMLString(_:baseURL:)` with a file:// baseURL does not grant the
-        // loaded document read access to other files in that directory — WebKit
-        // sandboxes it — so a relative "poplur_splash.mp4" could never load on
-        // device. The splash therefore sat on the black backdrop showing only
-        // the logo fallback, which is precisely what the fallback exists to
-        // avoid being seen for long. The approved Good Copy markup is correct
-        // and untouched; only the way the bytes reach it changes here, and it
-        // is the same base64 substitution this function already does for the
-        // logo below. ~350KB, read once while the splash is on screen.
-        var runtimeSource = approvedSource
-        if let videoURL = Bundle.main.url(forResource: "poplur_splash", withExtension: "mp4"),
-           let videoData = try? Data(contentsOf: videoURL) {
-            runtimeSource = runtimeSource.replacingOccurrences(
-                of: "/Poplur2025-iOS/Poplur2025/poplur_splash.mp4",
-                with: "data:video/mp4;base64,\(videoData.base64EncodedString())"
-            )
-        } else {
-            // Video missing from the bundle: leave a relative path so the
-            // markup stays valid, and let the logo fallback carry the screen.
-            assertionFailure("Approved Good Copy Splash video is missing")
-            runtimeSource = runtimeSource.replacingOccurrences(
-                of: "/Poplur2025-iOS/Poplur2025/poplur_splash.mp4",
-                with: "poplur_splash.mp4"
-            )
-        }
-        if let fallback = UIImage(named: "logo")?.pngData()?.base64EncodedString() {
-            runtimeSource = runtimeSource.replacingOccurrences(
-                of: "/Poplur2025-iOS/Poplur2025/Assets.xcassets/logo.imageset/logo1.png",
-                with: "data:image/png;base64,\(fallback)"
-            )
-        }
-
-        webView.loadHTMLString(runtimeSource, baseURL: Bundle.main.bundleURL)
-        return webView
+struct NativePreloginSplash: View {
+    @Environment(\.scenePhase) private var phase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                Color(red: 10 / 255, green: 7 / 255, blue: 9 / 255)
+                Image("logo").resizable().scaledToFit().frame(width: min(170, proxy.size.width * 0.45))
+                NativeSplashVideo(active: phase == .active)
+                RadialGradient(colors: [.black.opacity(0.55), .black.opacity(0.2), .clear], center: UnitPoint(x: 0.5, y: 0.56), startRadius: 0, endRadius: proxy.size.height * 0.5)
+                VStack(spacing: 16) {
+                    Text("Loading…").font(.custom("AvenirNext-Heavy", size: 20)).foregroundStyle(LinearGradient(colors: [.pink, .white, .pink], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    TimelineView(.animation(minimumInterval: 1 / 24, paused: phase != .active || reduceMotion)) { timeline in
+                        Canvas { context, size in
+                            context.fill(Path(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: 5), with: .color(.pink.opacity(0.25)))
+                            let offset = reduceMotion ? 0 : timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1) * 24
+                            for x in stride(from: -24 + offset, to: size.width + 24, by: 24) {
+                                let path = Path { p in p.move(to: CGPoint(x: x, y: 0)); p.addLine(to: CGPoint(x: x + 12, y: 0)); p.addLine(to: CGPoint(x: x + 3, y: size.height)); p.addLine(to: CGPoint(x: x - 9, y: size.height)); p.closeSubpath() }
+                                context.fill(path, with: .color(.pink))
+                            }
+                        }
+                    }.frame(height: 9).clipShape(Capsule()).overlay(Capsule().stroke(.pink.opacity(0.35), lineWidth: 1))
+                }.frame(width: min(215, proxy.size.width * 0.58)).position(x: proxy.size.width / 2, y: proxy.size.height * 0.68)
+            }
+        }.ignoresSafeArea().accessibilityElement(children: .ignore).accessibilityLabel("Loading Poplur").accessibilityIdentifier("nativePreloginSplash")
     }
+}
 
-    func updateUIView(_ webView: WKWebView, context: Context) {}
-
-    static func dismantleUIView(_ webView: WKWebView, coordinator: ()) {
-        (webView as? PoplurManagedWebView)?.poplurTearDown()
+private struct NativeSplashVideo: UIViewRepresentable {
+    var active: Bool
+    class PlayerView: UIView {
+        override class var layerClass: AnyClass { AVPlayerLayer.self }
+        var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+        var player: AVQueuePlayer?
+        var looper: AVPlayerLooper?
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            playerLayer.videoGravity = .resizeAspectFill
+            if let url = Bundle.main.url(forResource: "poplur_splash", withExtension: "mp4") {
+                let player = AVQueuePlayer(); player.isMuted = true
+                self.player = player; playerLayer.player = player
+                looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
+            }
+        }
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+        func stop() { player?.pause(); looper?.disableLooping(); looper = nil; player?.removeAllItems(); playerLayer.player = nil; player = nil }
     }
+    func makeUIView(context: Context) -> PlayerView { PlayerView() }
+    func updateUIView(_ view: PlayerView, context: Context) { active ? view.player?.play() : view.player?.pause() }
+    static func dismantleUIView(_ view: PlayerView, coordinator: ()) { view.stop() }
 }
