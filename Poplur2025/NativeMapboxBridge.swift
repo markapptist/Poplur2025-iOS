@@ -310,6 +310,14 @@ enum PoplurNativeMapbox {
     }
     private func cameraOptions(_ value: [String: Any]) -> CameraOptions {
         var camera = CameraOptions(center:(value["center"] as? [Double]).flatMap(coordinate),padding:padding(value["padding"]),zoom:cg(value["zoom"]),bearing:value["bearing"] as? Double,pitch:cg(value["pitch"]))
+        // The shared HUD sends CSS pixels. On a scaled tablet surface those
+        // differ from native points, just as they do for projection samples.
+        if let edges = camera.padding, let map {
+            let sx = map.bounds.width / max(1, viewport.width)
+            let sy = map.bounds.height / max(1, viewport.height)
+            camera.padding = UIEdgeInsets(top: edges.top * sy, left: edges.left * sx,
+                                          bottom: edges.bottom * sy, right: edges.right * sx)
+        }
         if let offset = value["offset"] as? [Double], offset.count == 2, let map {
             camera.anchor = CGPoint(x:map.bounds.midX+offset[0]*map.bounds.width/max(1,viewport.width),y:map.bounds.midY+offset[1]*map.bounds.height/max(1,viewport.height))
         }
