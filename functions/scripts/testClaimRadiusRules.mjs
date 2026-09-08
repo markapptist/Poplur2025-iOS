@@ -112,6 +112,16 @@ const create = (db, id, data) => setDoc(doc(db, "posts", id), data);
     "and a drop is still published as yourself");
 }
 
+// Projection policy belongs to the same authoritative decay service as radius.
+{
+  const db = await given({ claimRadiusMeters: 72_800, backfilled: true });
+  await assertSucceeds(create(db, 'projection-existing', drop(5000)));
+  for (const field of ['radiusDecayAnchorMillis', 'radiusDecayOrganicPerDay', 'radiusDecaySeedPerDay', 'radiusDecayBoostPerDay']) {
+    await assertFails(create(db, `forged-${field}`, drop(5000, { [field]: 0.05 })));
+    await assertFails(setDoc(doc(db, 'posts', 'projection-existing'), { [field]: 0.05 }, { merge: true }));
+  }
+}
+
 // The ceiling, and not some other clause, is what refuses the claim above:
 // the SAME document is accepted once the account has earned the ground.
 {

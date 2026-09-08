@@ -123,6 +123,8 @@ async function runRadiusDecay(nowMillis = Date.now(), dueReferences) {
             if (!next)
                 return;
             const before = (0, postEngagementPolicy_1.postRadiusParts)(post, nowMillis);
+            const validTrial = trial && Number.isFinite(trial.multiplier) && trial.multiplier >= 1 && trial.multiplier <= 10
+                && Number.isFinite(trial.effectiveAtMillis) && nowMillis >= trial.effectiveAtMillis ? trial : undefined;
             transaction.update(ref, {
                 organicRadiusMeters: next.organicRadiusMeters,
                 ...('boostedRadiusMeters' in next ? { boostedRadiusMeters: next.boostedRadiusMeters } : {}),
@@ -131,6 +133,13 @@ async function runRadiusDecay(nowMillis = Date.now(), dueReferences) {
                 radiusMeters: next.radiusMeters,
                 radius: next.radiusMeters,
                 decayedAt: nowTimestamp,
+                // Display-only projection contract. Clients can show the continuous
+                // curve between durable server updates without writing radius back.
+                radiusDecayAnchorMillis: stressDecay ? 0 : nowMillis,
+                radiusDecayOrganicPerDay: 1 - Math.pow(1 - postEngagementPolicy_1.RADIUS_DECAY_PER_DAY, validTrial?.multiplier ?? 1),
+                radiusDecaySeedPerDay: validTrial ? 1 - Math.pow(1 - postEngagementPolicy_1.RADIUS_DECAY_PER_DAY, validTrial.multiplier) : 0,
+                radiusDecayBoostPerDay: validTrial?.boostedEffectiveAtMillis && nowMillis >= validTrial.boostedEffectiveAtMillis
+                    ? 1 - Math.pow(1 - postEngagementPolicy_1.RADIUS_DECAY_PER_DAY, validTrial.multiplier) : 0,
                 updatedAt: firestore_1.FieldValue.serverTimestamp(),
             });
             // Entitlement is the sum of what an account's posts have earned, so

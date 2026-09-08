@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.qualifiedWinner = exports.candidateScore = exports.regionChildren = exports.parentRegion = exports.regionId = exports.wrapLongitude = exports.CHALLENGER_HOLD_MS = exports.RANK_MAX_AGE_MS = exports.RANK_WINDOW_MS = exports.RANK_HALF_LIFE_MS = exports.MAX_LOCAL_CELLS = exports.MAP_PAGE_SIZE = exports.MAX_REGION_TILES = exports.MAX_MAP_FEATURES = exports.REGION_DEPTH = exports.CELL_ROWS = exports.CELL_KM = exports.MAP_SCHEMA = void 0;
+exports.qualifiedWinner = exports.candidateScore = exports.regionChildren = exports.parentRegion = exports.regionId = exports.wrapLongitude = exports.CHALLENGER_HOLD_MS = exports.RANK_MAX_AGE_MS = exports.RANK_WINDOW_MS = exports.RANK_HALF_LIFE_MS = exports.MAP_VISIBLE_POSTS = exports.MAP_POSTS_PER_CELL = exports.MAX_LOCAL_CELLS = exports.MAP_PAGE_SIZE = exports.MAX_REGION_TILES = exports.MAX_MAP_FEATURES = exports.REGION_DEPTH = exports.CELL_ROWS = exports.CELL_KM = exports.MAP_SCHEMA = void 0;
+exports.spatialPostSelection = spatialPostSelection;
 exports.millis = millis;
 exports.cellColumns = cellColumns;
 exports.cellFromIndices = cellFromIndices;
@@ -28,6 +29,37 @@ exports.MAX_MAP_FEATURES = 200;
 exports.MAX_REGION_TILES = 64;
 exports.MAP_PAGE_SIZE = 100;
 exports.MAX_LOCAL_CELLS = 24;
+exports.MAP_POSTS_PER_CELL = 20;
+exports.MAP_VISIBLE_POSTS = 100;
+/** Spend the screen budget across areas before adding another pin to the
+ * busiest area. The selected post keeps a slot, without growing the budget. */
+function spatialPostSelection(candidates, selectedPostId) {
+    const unique = [...new Map(candidates.map(post => [post.postId, post])).values()];
+    const selected = unique.find(post => post.postId === selectedPostId);
+    const chosen = selected ? [selected] : [];
+    const counts = new Map(selected ? [[selected.cellId, 1]] : []);
+    const cells = new Map();
+    for (const post of unique) {
+        if (post === selected)
+            continue;
+        const queue = cells.get(post.cellId) || [];
+        if (queue.length < exports.MAP_POSTS_PER_CELL)
+            queue.push(post);
+        cells.set(post.cellId, queue);
+    }
+    for (let depth = 0; depth < exports.MAP_POSTS_PER_CELL && chosen.length < exports.MAP_VISIBLE_POSTS; depth++) {
+        for (const [cell, queue] of cells) {
+            if (chosen.length >= exports.MAP_VISIBLE_POSTS)
+                break;
+            const post = queue[depth], count = counts.get(cell) || 0;
+            if (post && count < exports.MAP_POSTS_PER_CELL) {
+                chosen.push(post);
+                counts.set(cell, count + 1);
+            }
+        }
+    }
+    return chosen;
+}
 exports.RANK_HALF_LIFE_MS = 6 * 3600_000;
 exports.RANK_WINDOW_MS = 6 * 3600_000;
 exports.RANK_MAX_AGE_MS = 72 * 3600_000;

@@ -2,6 +2,7 @@ import * as admin from 'firebase-admin';
 import { FieldPath, FieldValue } from 'firebase-admin/firestore';
 import { onDocumentCreated } from 'firebase-functions/v2/firestore';
 import { postOwnerUid } from './accountRadius';
+import { radiusReminderDue } from './radiusReminderPolicy';
 
 if (!admin.apps.length) admin.initializeApp();
 
@@ -26,16 +27,23 @@ export const notifyOnRadiusLoss = onDocumentCreated(
     if (!uid) return;
     const userRef = db.doc(`users/${uid}`);
     const notificationId = `radius-loss:${postId}:${historyId}`;
-    const created = await userRef.collection('notifications').doc(notificationId).create({
+    const notificationRef = userRef.collection('notifications').doc(notificationId);
+    const tokens = await db.runTransaction(async tx => {
+      const [existing, user] = await tx.getAll(notificationRef, userRef);
+      if (existing.exists) return [] as string[];
+      tx.create(notificationRef, {
       id: notificationId, kind: 'decrease', title: notification.title, detail: notification.body,
       actorUid: '', actorHandle: '', radiusDeltaMeters: notification.delta,
       createdAt: FieldValue.serverTimestamp(), isUnread: true, isDismissed: false, postId, historyId,
-    }).then(() => true).catch((error: { code?: number }) => {
-      if (error.code !== 6) throw error;
-      return false;
+      });
+      const data = user.data() || {};
+      const registered = Object.keys(data.fcmTokens || {});
+      if (!registered.length || !radiusReminderDue(data.radiusReminderAtMillis, Date.now())) return [] as string[];
+      // One atomic reservation across all posts prevents simultaneous decay
+      // triggers from turning a daily reminder into a burst of pushes.
+      tx.set(userRef, { radiusReminderAtMillis: Date.now() }, { merge: true });
+      return registered;
     });
-    if (!created) return;
-    const tokens = Object.keys((await userRef.get()).data()?.fcmTokens || {});
     for (let offset = 0; offset < tokens.length; offset += 500) {
       const batch = tokens.slice(offset, offset + 500);
       const result = await admin.messaging().sendEachForMulticast({

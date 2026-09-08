@@ -9,6 +9,7 @@ import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { reconcileDecayPost } from './radiusDecayQueue';
 import { advanceRank, Candidate, chooseChampion, competitionCell, eligibleMapPost, MAP_PAGE_SIZE, MAP_SCHEMA,
   MAX_LOCAL_CELLS, MAX_MAP_FEATURES, millis, parentRegion, parseCell, parseMapQuery, parseRegion,
+  MAP_POSTS_PER_CELL, MAP_VISIBLE_POSTS, spatialPostSelection,
   postCohort, qualifiedWinner, Rank, rankKey, RANK_MAX_AGE_MS, RANK_WINDOW_MS, regionAt, regionChildren,
   regionId, REGION_DEPTH, visibleCells, visibleRegions } from './mapDiscoveryPolicy';
 
@@ -131,7 +132,7 @@ export async function rebuildMapSummary(kind: 'cell' | 'region', key: string, co
     const old = previous.data() as Summary | undefined;
     const choice = chooseChampion(candidates, old || {}, now, Boolean(cell));
     const alternates = candidates.filter(c => c.expiresAtMillis > now && c.postId !== choice.winner?.postId)
-      .sort((a, b) => b.rankKey - a.rankKey).slice(0, 4);
+      .sort((a, b) => b.rankKey - a.rankKey).slice(0, MAP_POSTS_PER_CELL - 1);
     const next: Summary = { ...choice, alternates, updatedAtMillis: now, cohort, ...(cell ? { leaf: regionId(tile) } : {}) };
     tx.set(target, next);
     const winner = choice.winner;
@@ -329,17 +330,17 @@ export async function runMapDiscoveryQuery(uid: string, raw: unknown) {
     const summaries = refs.length ? await readSummaryTiles(refs) : [];
     // Include nearby alternatives as regular pins; only the elected leader gets
     // winner styling. Every candidate still passes live privacy checks.
-    candidates = summaries.filter(c => c.expiresAtMillis > Date.now()).slice(0, MAX_MAP_FEATURES);
+    candidates = spatialPostSelection(summaries.filter(c => c.expiresAtMillis > Date.now()), input.selectedPostId);
   }
   if (input.selectedPostId && candidates.length < MAX_MAP_FEATURES) {
     const selected = await db.doc(`mapPostIndex/${input.selectedPostId}`).get();
     if (selected.exists) candidates.push(selected.data() as Candidate);
   }
-  const posts = await hydrateMapCandidates(candidates, uid, input.includeTest);
+  const posts = await hydrateMapCandidates(spatialPostSelection(candidates, input.selectedPostId), uid, input.includeTest);
   if (mode === 'posts') for (const post of posts) post.competition.status = 'local';
   const notificationFocus = await notificationFocusFor(uid, raw);
   return { ...(notificationFocus ? { notificationFocus } : {}), schema: MAP_SCHEMA, enabled: true, mode, posts, cells: cellShapes, nextCursor,
-    refreshAfterSeconds: 60, generatedAtMillis: Date.now(), limits: { features: MAX_MAP_FEATURES, page: MAP_PAGE_SIZE, richPins: 36 } };
+    refreshAfterSeconds: 60, generatedAtMillis: Date.now(), limits: { features: MAX_MAP_FEATURES, page: MAP_PAGE_SIZE, posts: MAP_VISIBLE_POSTS, perCell: MAP_POSTS_PER_CELL, richPins: 36 } };
 }
 export const queryMapDiscovery = onCall({ region, timeoutSeconds: 30, memory: '512MiB', cpu: 1, concurrency: 40, maxInstances: 4 }, async request => {
   if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Sign in to explore the map.');

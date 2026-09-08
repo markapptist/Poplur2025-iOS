@@ -185,7 +185,7 @@ async function rebuildMapSummary(kind, key, cohort) {
         const old = previous.data();
         const choice = (0, mapDiscoveryPolicy_1.chooseChampion)(candidates, old || {}, now, Boolean(cell));
         const alternates = candidates.filter(c => c.expiresAtMillis > now && c.postId !== choice.winner?.postId)
-            .sort((a, b) => b.rankKey - a.rankKey).slice(0, 4);
+            .sort((a, b) => b.rankKey - a.rankKey).slice(0, mapDiscoveryPolicy_1.MAP_POSTS_PER_CELL - 1);
         const next = { ...choice, alternates, updatedAtMillis: now, cohort, ...(cell ? { leaf: (0, mapDiscoveryPolicy_1.regionId)(tile) } : {}) };
         tx.set(target, next);
         const winner = choice.winner;
@@ -430,20 +430,20 @@ async function runMapDiscoveryQuery(uid, raw) {
         const summaries = refs.length ? await readSummaryTiles(refs) : [];
         // Include nearby alternatives as regular pins; only the elected leader gets
         // winner styling. Every candidate still passes live privacy checks.
-        candidates = summaries.filter(c => c.expiresAtMillis > Date.now()).slice(0, mapDiscoveryPolicy_1.MAX_MAP_FEATURES);
+        candidates = (0, mapDiscoveryPolicy_1.spatialPostSelection)(summaries.filter(c => c.expiresAtMillis > Date.now()), input.selectedPostId);
     }
     if (input.selectedPostId && candidates.length < mapDiscoveryPolicy_1.MAX_MAP_FEATURES) {
         const selected = await db.doc(`mapPostIndex/${input.selectedPostId}`).get();
         if (selected.exists)
             candidates.push(selected.data());
     }
-    const posts = await hydrateMapCandidates(candidates, uid, input.includeTest);
+    const posts = await hydrateMapCandidates((0, mapDiscoveryPolicy_1.spatialPostSelection)(candidates, input.selectedPostId), uid, input.includeTest);
     if (mode === 'posts')
         for (const post of posts)
             post.competition.status = 'local';
     const notificationFocus = await notificationFocusFor(uid, raw);
     return { ...(notificationFocus ? { notificationFocus } : {}), schema: mapDiscoveryPolicy_1.MAP_SCHEMA, enabled: true, mode, posts, cells: cellShapes, nextCursor,
-        refreshAfterSeconds: 60, generatedAtMillis: Date.now(), limits: { features: mapDiscoveryPolicy_1.MAX_MAP_FEATURES, page: mapDiscoveryPolicy_1.MAP_PAGE_SIZE, richPins: 36 } };
+        refreshAfterSeconds: 60, generatedAtMillis: Date.now(), limits: { features: mapDiscoveryPolicy_1.MAX_MAP_FEATURES, page: mapDiscoveryPolicy_1.MAP_PAGE_SIZE, posts: mapDiscoveryPolicy_1.MAP_VISIBLE_POSTS, perCell: mapDiscoveryPolicy_1.MAP_POSTS_PER_CELL, richPins: 36 } };
 }
 exports.queryMapDiscovery = (0, https_1.onCall)({ region, timeoutSeconds: 30, memory: '512MiB', cpu: 1, concurrency: 40, maxInstances: 4 }, async (request) => {
     if (!request.auth?.uid)

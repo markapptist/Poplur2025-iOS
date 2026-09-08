@@ -7,6 +7,34 @@ export const MAX_MAP_FEATURES = 200;
 export const MAX_REGION_TILES = 64;
 export const MAP_PAGE_SIZE = 100;
 export const MAX_LOCAL_CELLS = 24;
+export const MAP_POSTS_PER_CELL = 20;
+export const MAP_VISIBLE_POSTS = 100;
+
+/** Spend the screen budget across areas before adding another pin to the
+ * busiest area. The selected post keeps a slot, without growing the budget. */
+export function spatialPostSelection<T extends { postId: string; cellId: string }>(
+  candidates: readonly T[], selectedPostId?: string | null,
+): T[] {
+  const unique = [...new Map(candidates.map(post => [post.postId, post])).values()];
+  const selected = unique.find(post => post.postId === selectedPostId);
+  const chosen: T[] = selected ? [selected] : [];
+  const counts = new Map<string, number>(selected ? [[selected.cellId, 1]] : []);
+  const cells = new Map<string, T[]>();
+  for (const post of unique) {
+    if (post === selected) continue;
+    const queue = cells.get(post.cellId) || [];
+    if (queue.length < MAP_POSTS_PER_CELL) queue.push(post);
+    cells.set(post.cellId, queue);
+  }
+  for (let depth = 0; depth < MAP_POSTS_PER_CELL && chosen.length < MAP_VISIBLE_POSTS; depth++) {
+    for (const [cell, queue] of cells) {
+      if (chosen.length >= MAP_VISIBLE_POSTS) break;
+      const post = queue[depth], count = counts.get(cell) || 0;
+      if (post && count < MAP_POSTS_PER_CELL) { chosen.push(post); counts.set(cell, count + 1); }
+    }
+  }
+  return chosen;
+}
 export const RANK_HALF_LIFE_MS = 6 * 3600_000;
 export const RANK_WINDOW_MS = 6 * 3600_000;
 export const RANK_MAX_AGE_MS = 72 * 3600_000;

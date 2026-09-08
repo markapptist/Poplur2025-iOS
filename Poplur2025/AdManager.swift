@@ -81,7 +81,7 @@ final class AdManager: NSObject, FullScreenContentDelegate {
             self.retryAttempt = 0
             NSLog("[Ads] interstitial ready")
             PoplurDiagLog.append("[Ads] interstitial ready")
-            // The feed is paused for at most two seconds at an eligible break.
+            // Keep Feed visible while inventory loads at an eligible break.
             // After that lease, retain the ad for the NEXT natural transition.
             if let presenter = self.pendingPresenter {
                 self.presentInterstitial(from: presenter)
@@ -118,13 +118,13 @@ final class AdManager: NSObject, FullScreenContentDelegate {
             pendingPresenter = nil
             isPresenting = true
             ad.fullScreenContentDelegate = self
-            publishFeedAdVisibility(true)
             PoplurDiagLog.append("[Ads] presenting at Feed transition")
             ad.present(from: presenter)
         } else {
             if pendingPresenter == nil {
                 pendingPresenter = root
-                publishFeedAdVisibility(true)
+                // Loading inventory does not cover the WebView. Publishing
+                // open here hid the cube/HUD on every no-fill transition.
                 let expiry = DispatchWorkItem { [weak self] in self?.cancelPendingPresentation() }
                 pendingExpiry = expiry
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: expiry)
@@ -188,6 +188,10 @@ final class AdManager: NSObject, FullScreenContentDelegate {
     }
     
     // MARK: - GADFullScreenContentDelegate
+
+    func adWillPresentFullScreenContent(_ ad: FullScreenPresentingAd) {
+        publishFeedAdVisibility(true)
+    }
     
     func adDidDismissFullScreenContent(_ ad: FullScreenPresentingAd) {
         presentingAd = nil

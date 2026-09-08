@@ -39,6 +39,7 @@ const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-admin/firestore");
 const firestore_2 = require("firebase-functions/v2/firestore");
 const accountRadius_1 = require("./accountRadius");
+const radiusReminderPolicy_1 = require("./radiusReminderPolicy");
 if (!admin.apps.length)
     admin.initializeApp();
 function radiusLossNotification(entry) {
@@ -63,18 +64,25 @@ exports.notifyOnRadiusLoss = (0, firestore_2.onDocumentCreated)({ document: 'pos
         return;
     const userRef = db.doc(`users/${uid}`);
     const notificationId = `radius-loss:${postId}:${historyId}`;
-    const created = await userRef.collection('notifications').doc(notificationId).create({
-        id: notificationId, kind: 'decrease', title: notification.title, detail: notification.body,
-        actorUid: '', actorHandle: '', radiusDeltaMeters: notification.delta,
-        createdAt: firestore_1.FieldValue.serverTimestamp(), isUnread: true, isDismissed: false, postId, historyId,
-    }).then(() => true).catch((error) => {
-        if (error.code !== 6)
-            throw error;
-        return false;
+    const notificationRef = userRef.collection('notifications').doc(notificationId);
+    const tokens = await db.runTransaction(async (tx) => {
+        const [existing, user] = await tx.getAll(notificationRef, userRef);
+        if (existing.exists)
+            return [];
+        tx.create(notificationRef, {
+            id: notificationId, kind: 'decrease', title: notification.title, detail: notification.body,
+            actorUid: '', actorHandle: '', radiusDeltaMeters: notification.delta,
+            createdAt: firestore_1.FieldValue.serverTimestamp(), isUnread: true, isDismissed: false, postId, historyId,
+        });
+        const data = user.data() || {};
+        const registered = Object.keys(data.fcmTokens || {});
+        if (!registered.length || !(0, radiusReminderPolicy_1.radiusReminderDue)(data.radiusReminderAtMillis, Date.now()))
+            return [];
+        // One atomic reservation across all posts prevents simultaneous decay
+        // triggers from turning a daily reminder into a burst of pushes.
+        tx.set(userRef, { radiusReminderAtMillis: Date.now() }, { merge: true });
+        return registered;
     });
-    if (!created)
-        return;
-    const tokens = Object.keys((await userRef.get()).data()?.fcmTokens || {});
     for (let offset = 0; offset < tokens.length; offset += 500) {
         const batch = tokens.slice(offset, offset + 500);
         const result = await admin.messaging().sendEachForMulticast({

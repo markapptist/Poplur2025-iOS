@@ -64,7 +64,8 @@ final class AuthoredPostsBridge {
               (status.isEmpty || status == "published" || status == "live"),
               !enabled(data["deleted"]), !enabled(data["isDeleted"]) else { return nil }
         let fields = ["userID", "userId", "ownerId", "audience", "visibilityStatus", "status", "deleted", "isDeleted",
-            "radiusMeters", "radius", "organicRadiusMeters", "seedRadiusMeters", "playbackURL", "mediaURL",
+            "radiusMeters", "radius", "organicRadiusMeters", "seedRadiusMeters", "boostedRadiusMeters",
+            "radiusDecayAnchorMillis", "radiusDecayOrganicPerDay", "radiusDecaySeedPerDay", "radiusDecayBoostPerDay", "playbackURL", "mediaURL",
             "mediaType", "posterURL", "photoViewSeconds", "username", "handle", "displayName", "caption", "channelId",
             "profilePictureURL", "avatarURL", "avatarUrl", "photoURL", "viewCount", "likeCount", "upvoteCount",
             "downvoteCount", "dislikeCount", "commentCount", "shareCount", "syntheticJourney", "syntheticBeta", "syntheticCohort"]

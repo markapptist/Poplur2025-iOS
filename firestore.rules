@@ -135,7 +135,8 @@ service cloud.firestore {
         'viewCount', 'likeCount', 'upvoteCount',
         'downvoteCount', 'dislikeCount', 'commentCount', 'shareCount',
         'lastEngagementAt', 'likeNotifyAt', 'likesPendingNotify',
-        'decayedAt'
+        'decayedAt', 'radiusDecayAnchorMillis', 'radiusDecayOrganicPerDay',
+        'radiusDecaySeedPerDay', 'radiusDecayBoostPerDay'
       ];
     }
 
@@ -191,7 +192,9 @@ service cloud.firestore {
         && d.get('dislikeCount', 0) == 0 && d.get('commentCount', 0) == 0
         && d.get('shareCount', 0) == 0
         && !d.keys().hasAny(['boostedRadiusMeters', 'boostExpiresAt',
-          'lastEngagementAt', 'likeNotifyAt', 'likesPendingNotify', 'decayedAt']);
+          'lastEngagementAt', 'likeNotifyAt', 'likesPendingNotify', 'decayedAt',
+          'radiusDecayAnchorMillis', 'radiusDecayOrganicPerDay',
+          'radiusDecaySeedPerDay', 'radiusDecayBoostPerDay']);
     }
 
     function keepsPostEngagementFieldsUnchanged() {
