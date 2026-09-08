@@ -1,0 +1,100 @@
+{
+  "big-ben": {
+    "asset": "native-map/landmarks/big-ben.glb",
+    "height": 1.0,
+    "sourceBytes": 173140,
+    "nativeBytes": 1518412,
+    "pixelsPreserved": true
+  },
+  "burj-khalifa": {
+    "asset": "native-map/landmarks/burj-khalifa.glb",
+    "height": 1.0,
+    "sourceBytes": 146364,
+    "nativeBytes": 1381324,
+    "pixelsPreserved": true
+  },
+  "christ-redeemer": {
+    "asset": "native-map/landmarks/christ-redeemer.glb",
+    "height": 1.0,
+    "sourceBytes": 118872,
+    "nativeBytes": 1094076,
+    "pixelsPreserved": true
+  },
+  "cn-tower": {
+    "asset": "native-map/landmarks/cn-tower.glb",
+    "height": 1.0,
+    "sourceBytes": 98688,
+    "nativeBytes": 895448,
+    "pixelsPreserved": true
+  },
+  "colosseum": {
+    "asset": "native-map/landmarks/colosseum.glb",
+    "height": 0.3564460128545761,
+    "sourceBytes": 140332,
+    "nativeBytes": 1204524,
+    "pixelsPreserved": true
+  },
+  "eiffel": {
+    "asset": "native-map/landmarks/eiffel.glb",
+    "height": 1.0,
+    "sourceBytes": 148936,
+    "nativeBytes": 1389564,
+    "pixelsPreserved": true
+  },
+  "giza": {
+    "asset": "native-map/landmarks/giza.glb",
+    "height": 0.4804690033197403,
+    "sourceBytes": 133312,
+    "nativeBytes": 1197112,
+    "pixelsPreserved": true
+  },
+  "golden-gate": {
+    "asset": "native-map/landmarks/golden-gate.glb",
+    "height": 0.3789060115814209,
+    "sourceBytes": 150264,
+    "nativeBytes": 1340768,
+    "pixelsPreserved": true
+  },
+  "rogers-centre": {
+    "asset": "native-map/landmarks/rogers-centre.glb",
+    "height": 0.4140619933605194,
+    "sourceBytes": 153760,
+    "nativeBytes": 1303556,
+    "pixelsPreserved": true
+  },
+  "space-needle": {
+    "asset": "native-map/landmarks/space-needle.glb",
+    "height": 1.0,
+    "sourceBytes": 158896,
+    "nativeBytes": 1413152,
+    "pixelsPreserved": true
+  },
+  "statue-liberty": {
+    "asset": "native-map/landmarks/statue-liberty.glb",
+    "height": 0.9980469942092896,
+    "sourceBytes": 122044,
+    "nativeBytes": 1152764,
+    "pixelsPreserved": true
+  },
+  "sydney-opera": {
+    "asset": "native-map/landmarks/sydney-opera.glb",
+    "height": 0.5507819950580597,
+    "sourceBytes": 151608,
+    "nativeBytes": 1344824,
+    "pixelsPreserved": true
+  },
+  "taj-mahal": {
+    "asset": "native-map/landmarks/taj-mahal.glb",
+    "height": 0.6796880066394806,
+    "sourceBytes": 118668,
+    "nativeBytes": 1062896,
+    "pixelsPreserved": true
+  },
+  "navigation-car": {
+    "asset": "native-map/navigation-car.glb",
+    "height": 1.0850269794464111,
+    "sourceBytes": 528696,
+    "nativeBytes": 528972,
+    "pixelsPreserved": true
+  }
+}
