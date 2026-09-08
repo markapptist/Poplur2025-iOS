@@ -2302,6 +2302,21 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     }
                     return
                 }
+                if type == "cancelMapSelfieVideo", let requestId = body["requestId"] as? String {
+                    PoplurMapSelfieVideo.cancel(requestId)
+                    return
+                }
+                if type == "requestMapSelfieVideo", let webView = bridge.webView,
+                   let source = body["source"] as? String,
+                   let requestId = body["requestId"] as? String, requestId.count <= 100 {
+                    PoplurMapSelfieVideo.prepare(source: source, requestId: requestId) { [weak webView] url in
+                        let payload: [String: Any] = ["requestId": requestId, "url": url as Any? ?? NSNull()]
+                        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+                              let json = String(data: data, encoding: .utf8) else { return }
+                        webView?.evaluateJavaScript("window.dispatchEvent(new CustomEvent('poplur-map-selfie-video', {detail: \(json)})); true;")
+                    }
+                    return
+                }
                 if type == "requestProfile", let webView = bridge.webView {
                     // The page asking for the profile is the reliable "we are
                     // signed in and the profile matters right now" moment, and

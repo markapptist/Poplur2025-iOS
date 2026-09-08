@@ -179,6 +179,10 @@ struct PoplurClayMapView: UIViewRepresentable {
             let cacheControl = (relativePath.hasPrefix("/captures/") || relativePath.hasPrefix("/profile-selfie."))
                 ? "no-store"
                 : "public, max-age=31536000, immutable"
+            if let selfie = PoplurMapSelfieVideo.item(for: relativePath) {
+                serveCaptureFile(selfie, mime: "video/mp4", request: urlSchemeTask.request, task: urlSchemeTask)
+                return
+            }
             if let selfie = PoplurProfileSelfieStore.item(for: relativePath) {
                 serveCaptureFile(
                     selfie.url,
