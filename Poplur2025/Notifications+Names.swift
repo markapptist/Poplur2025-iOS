@@ -637,11 +637,8 @@ final class PoplurNotificationCenter: NSObject, ObservableObject, UNUserNotifica
         }
     }
 
-    /// Files an incoming engagement push into the in-app list.
-    ///
-    /// Keyed on engagementId, so the same push seen first in the foreground and
-    /// then again on tap collapses to one row rather than two —
-    /// addInAppNotification already replaces by id.
+    /// Keep radius-loss pushes as well as engagements in the local inbox.
+    /// Decay carries a notificationId and historyId, without an engagementId.
     private func recordRemoteNotification(_ content: UNNotificationContent) {
         let info = content.userInfo
         if info["kind"] as? String == "dm",
@@ -663,13 +660,14 @@ final class PoplurNotificationCenter: NSObject, ObservableObject, UNUserNotifica
             refreshBadge()
             return
         }
-        guard let engagementId = info["engagementId"] as? String, !engagementId.isEmpty else { return }
-        let notificationId = (info["notificationId"] as? String) ?? engagementId
+        guard let notificationId = [info["notificationId"] as? String, info["engagementId"] as? String]
+            .compactMap({ $0?.trimmingCharacters(in: .whitespacesAndNewlines) })
+            .first(where: { !$0.isEmpty }) else { return }
         let rawKind = info["kind"] as? String
         addInAppNotification(
             PoplurDeviceNotification(
                 id: notificationId,
-                kind: .engagement,
+                kind: resolveKind(rawKind),
                 title: content.title,
                 detail: content.body,
                 createdAt: Date(),
@@ -746,6 +744,8 @@ final class PoplurNotificationCenter: NSObject, ObservableObject, UNUserNotifica
     private func resolveKind(_ raw: String?) -> PoplurDeviceNotification.Kind {
         guard let raw else { return .engagement }
         switch raw {
+        case "decrease", "radiusDip":   return .radiusDip
+        case "growth", "radiusGrowth":  return .radiusGrowth
         case "like", "view", "comment": return .engagement
         case "dm", "message":           return .dm
         case "mention":                 return .mention
