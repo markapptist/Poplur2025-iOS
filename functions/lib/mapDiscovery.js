@@ -415,7 +415,7 @@ async function runMapDiscoveryQuery(uid, raw) {
         for (const post of posts)
             post.competition.status = 'local';
     return { schema: mapDiscoveryPolicy_1.MAP_SCHEMA, enabled: true, mode, posts, cells: cellShapes, nextCursor,
-        refreshAfterSeconds: 60, generatedAtMillis: Date.now(), limits: { features: mapDiscoveryPolicy_1.MAX_MAP_FEATURES, page: mapDiscoveryPolicy_1.MAP_PAGE_SIZE, richPins: 18 } };
+        refreshAfterSeconds: 60, generatedAtMillis: Date.now(), limits: { features: mapDiscoveryPolicy_1.MAX_MAP_FEATURES, page: mapDiscoveryPolicy_1.MAP_PAGE_SIZE, richPins: 36 } };
 }
 exports.queryMapDiscovery = (0, https_1.onCall)({ region, timeoutSeconds: 30, memory: '512MiB', cpu: 1, concurrency: 40, maxInstances: 4 }, async (request) => {
     if (!request.auth?.uid)

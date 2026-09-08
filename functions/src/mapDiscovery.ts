@@ -315,7 +315,7 @@ export async function runMapDiscoveryQuery(uid: string, raw: unknown) {
   const posts = await hydrateMapCandidates(candidates, uid, input.includeTest);
   if (mode === 'posts') for (const post of posts) post.competition.status = 'local';
   return { schema: MAP_SCHEMA, enabled: true, mode, posts, cells: cellShapes, nextCursor,
-    refreshAfterSeconds: 60, generatedAtMillis: Date.now(), limits: { features: MAX_MAP_FEATURES, page: MAP_PAGE_SIZE, richPins: 18 } };
+    refreshAfterSeconds: 60, generatedAtMillis: Date.now(), limits: { features: MAX_MAP_FEATURES, page: MAP_PAGE_SIZE, richPins: 36 } };
 }
 export const queryMapDiscovery = onCall({ region, timeoutSeconds: 30, memory: '512MiB', cpu: 1, concurrency: 40, maxInstances: 4 }, async request => {
   if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Sign in to explore the map.');
