@@ -880,6 +880,10 @@ struct PostLoginHomeSurface: View {
             // WebView itself can stay transparent for the camera punch-through.
             Color(red: 5/255, green: 4/255, blue: 7/255).ignoresSafeArea()
 
+            if PoplurNativeMapbox.isEnabled {
+                NativeMapboxSurface().ignoresSafeArea()
+            }
+
             if PoplurNativeAdaptiveMap.isEnabled && camera.nativeMapVisible {
                 NativeAdaptiveMapLayer()
                     .transition(.opacity)

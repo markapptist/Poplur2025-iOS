@@ -289,6 +289,7 @@ enum PoplurWebHome {
             // the Mapbox/WebGL iframe while the native renderer owns Map.
             queryItems.append(URLQueryItem(name: "nativeMap", value: "1"))
         }
+        if PoplurNativeMapbox.isEnabled { queryItems.append(URLQueryItem(name:"nativeMapRenderer",value:"1")) }
         queryItems.append(contentsOf: PoplurPermissionRouting.homePrimerQueryItems())
         components.queryItems = queryItems
         return components.url
@@ -742,6 +743,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
     }
 
     static func dismantleUIView(_ uiView: WKWebView, coordinator: Coordinator) {
+        NativeMapboxBridge.shared.detach(uiView)
         setNativeMapRendererActive(false)
         PoplurNotificationCenter.shared.stopServerInboxListener(owner: coordinator.notificationInboxOwner)
         (uiView as? PoplurManagedWebView)?.clearNativeMapPresentation()
@@ -2167,6 +2169,9 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     // authenticated launch does not repeat the primer.
                     PoplurPermissionRouting.markHandled(permission)
                 }
+                if type == "nativeMapRenderer", PoplurNativeMapbox.isEnabled, let webView = bridge.webView {
+                    NativeMapboxBridge.shared.receive(body,webView:webView)
+                }
                 if type == "nativeMapPresentation", let webView = bridge.webView {
                     applyNativeMapPresentation(body, to: webView)
                 }
@@ -2213,6 +2218,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     if tab != "map", nativeMapPresentationActive,
                        let webView = bridge.webView {
                         nativeMapPresentationActive = false
+                        NativeMapboxBridge.shared.present(false)
                         (webView as? PoplurManagedWebView)?.clearNativeMapPresentation()
                         PostLoginHomeWebView.setNativeMapRendererActive(false)
                     }
@@ -2453,7 +2459,9 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             to webView: WKWebView
         ) {
             let requestedActive = (body["active"] as? Bool) == true
-            let active = PoplurNativeAdaptiveMap.isEnabled && requestedActive
+            let usesMapbox = body["renderer"] as? String == "mapbox" && PoplurNativeMapbox.isEnabled
+            let active = (usesMapbox || PoplurNativeAdaptiveMap.isEnabled) && requestedActive
+            if usesMapbox { NativeMapboxBridge.shared.present(active) }
             nativeMapPresentationActive = active
 
             let managed = webView as? PoplurManagedWebView
@@ -2490,7 +2498,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         private func updateCameraHole() {
             guard let webView = bridge.webView else { return }
             let shouldRevealLiveCamera = currentWebTab == "post" && webReportsLiveCamera
-            let shouldRevealNativeMap = PoplurNativeAdaptiveMap.isEnabled
+            let shouldRevealNativeMap = (PoplurNativeMapbox.isEnabled || PoplurNativeAdaptiveMap.isEnabled)
                 && nativeMapPresentationActive
             DispatchQueue.main.async {
                 PostLoginHomeWebView.setCameraHole(
