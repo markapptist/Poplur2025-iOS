@@ -738,6 +738,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         coordinator.feedPostsRegistration = nil
         coordinator.ownFeedRegistration?.remove()
         coordinator.ownFeedRegistration = nil
+        coordinator.authoredPostsBridge.stopAll()
         if liveWebView === uiView { liveWebView = nil }
         if liveCoordinator === coordinator { liveCoordinator = nil }
         PoplurWebCaptureStore.purge()
@@ -804,6 +805,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         /// notificationInboxOwner: the outer struct's dismantleUIView removes it.
         fileprivate var feedPostsRegistration: ListenerRegistration?
         fileprivate var ownFeedRegistration: ListenerRegistration?
+        fileprivate let authoredPostsBridge = AuthoredPostsBridge()
         /// The account's own posts, fetched once per arm on their own task and merged into every
         /// forward without delaying it. See deliverFeedPosts.
         fileprivate var ownFeedDocuments: [QueryDocumentSnapshot] = []
@@ -959,6 +961,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 lastDeliveredPitch = nil
                 lastDeliveredHeading = nil
             } else {
+                authoredPostsBridge.stopAll()
                 // Never carry a stale web demand across a native lifecycle
                 // suspension. The governed renderer republishes its current
                 // demand after the matching foreground edge.
@@ -1109,6 +1112,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             }
             feedPostsRegistration?.remove()
             ownFeedRegistration?.remove()
+            authoredPostsBridge.stopAll()
             recoveryWorkItem?.cancel()
             navigatorMotionDemandExpiryWorkItem?.cancel()
             notificationObservers.forEach(NotificationCenter.default.removeObserver)
@@ -2376,6 +2380,9 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 }
                 if type == "requestProfilePosts", let webView = bridge.webView {
                     deliverProfilePosts(into: webView)
+                }
+                if (type == "watchAuthoredPosts" || type == "stopAuthoredPosts"), let webView = bridge.webView {
+                    authoredPostsBridge.handle(body, into: webView)
                 }
                 if type == "requestFeedPosts", let webView = bridge.webView {
                     deliverFeedPosts(into: webView)
