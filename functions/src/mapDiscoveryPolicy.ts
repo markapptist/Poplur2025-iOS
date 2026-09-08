@@ -5,7 +5,7 @@ export const CELL_ROWS = Math.ceil(Math.PI * 6371 / CELL_KM);
 export const REGION_DEPTH = 10;
 export const MAX_MAP_FEATURES = 200;
 export const MAX_REGION_TILES = 64;
-export const MAP_PAGE_SIZE = 50;
+export const MAP_PAGE_SIZE = 100;
 export const MAX_LOCAL_CELLS = 24;
 export const RANK_HALF_LIFE_MS = 6 * 3600_000;
 export const RANK_WINDOW_MS = 6 * 3600_000;
@@ -22,7 +22,7 @@ export type Candidate = {
   postId: string; ownerId: string; cellId: string; cohort: Cohort;
   latitude: number; longitude: number; createdAtMillis: number;
   rankKey: number; exposure: number; rankAt: number; expiresAtMillis: number;
-  rankBucket?: number; rankEligible?: boolean;
+  rankBucket?: number; rankEligible?: boolean; summaryLeader?: boolean;
 };
 export const wrapLongitude = (lng: number) => ((lng + 180) % 360 + 360) % 360 - 180;
 const clamp = (n: number, a: number, b: number) => Math.max(a, Math.min(b, n));

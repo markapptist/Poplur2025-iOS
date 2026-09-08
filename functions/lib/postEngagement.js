@@ -55,7 +55,8 @@ function publishedPost(post) {
     const audience = boundedText(post.audience, 24).toLowerCase();
     const status = boundedText(post.visibilityStatus ?? post.status, 24).toLowerCase();
     return (!audience || audience === "public")
-        && (!status || status === "published" || status === "live");
+        && (!status || status === "published" || status === "live")
+        && Number(post.radiusMeters ?? post.radius ?? post.organicRadiusMeters) > 0;
 }
 function actorHandle(user) {
     const value = boundedText(user.username ?? user.handle ?? user.displayName, 40);

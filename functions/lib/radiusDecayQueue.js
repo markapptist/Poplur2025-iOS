@@ -54,7 +54,7 @@ const decayShard = (id) => parseInt((0, crypto_1.createHash)('sha256').update(id
 exports.decayShard = decayShard;
 function needsDecay(post, now = Date.now()) {
     const parts = (0, postEngagementPolicy_1.postRadiusParts)(post, now);
-    return parts.organic > 0 || (post.syntheticBeta === true && post.simulationRetentionVersion === 1 && parts.seed > 0);
+    return post.visibilityStatus !== 'expired' && (parts.organic > 0 || parts.seed > 0);
 }
 async function reconcileDecayPost(postId) {
     await db.runTransaction(async (tx) => {

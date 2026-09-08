@@ -14,10 +14,10 @@ const {Timestamp}=admin.firestore;
  for(let i=0;i<posts.length;i+=20) await Promise.all(posts.slice(i,i+20).map(p=>m.reconcileMapPost(p.id)));
  const query={bounds:{west:-79.4,east:-79.37,south:43.64,north:43.67},zoom:14,includeTest:true};
  let first=await m.runMapDiscoveryQuery('viewer',query);
- assert.equal(first.mode,'posts');assert.equal(first.posts.length,50);assert.ok(first.nextCursor);
+ assert.equal(first.mode,'posts');assert.equal(first.posts.length,100);assert.ok(first.nextCursor);
  let second=await m.runMapDiscoveryQuery('viewer',{...query,cursor:first.nextCursor});
- assert.equal(second.posts.length,50);assert.ok(!second.posts.some(p=>first.posts.some(a=>a.id===p.id)));
- let third=await m.runMapDiscoveryQuery('viewer',{...query,cursor:second.nextCursor});assert.equal(third.posts.length,20);assert.equal(third.nextCursor,null);
+ assert.equal(second.posts.length,20);assert.ok(!second.posts.some(p=>first.posts.some(a=>a.id===p.id)));
+ assert.equal(second.nextCursor,null);
  await assert.rejects(()=>m.runMapDiscoveryQuery('viewer',{...query,zoom:15,cursor:first.nextCursor}));
  const real=await m.runMapDiscoveryQuery('viewer',{...query,includeTest:false});assert.ok(!real.posts.some(p=>p.id==='p000'));
  const event={actorUid:'actor0',kind:'view',applied:true,radiusDeltaMeters:1,createdAt:Timestamp.now()};
@@ -33,6 +33,7 @@ const {Timestamp}=admin.firestore;
  while(r){await m.rebuildMapSummary('region',p.regionId(r),'real');r=p.parentRegion(r);}
  const world=await m.runMapDiscoveryQuery('viewer',{bounds:{west:-180,east:180,south:-90,north:90},zoom:2,includeTest:false});
  assert.equal(world.mode,'regions');assert.ok(world.posts.some(p=>p.id==='p001'));
+ assert.equal(world.posts.length,5);assert.equal(world.posts.filter(p=>p.competition.status==='winner').length,1);
  // Cached winner exists; changing privacy must suppress it synchronously.
  await db.doc('users/owner').update({privateAccount:true});
  assert.equal((await m.runMapDiscoveryQuery('viewer',{...query,includeTest:false})).posts.length,0);

@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.syntheticDailySimulation = exports.poplurAiApi = exports.cameraSceneScan = exports.premiumAiAssist = exports.generateRetroGame = exports.testSessionIngest = exports.testActivityControl = exports.refreshLiveNews = exports.liveNewsApi = exports.wardrobeGarmentApi = exports.meshyStatus = exports.meshyGenerate = exports.setAccountLocationPrivacy = exports.notifyOnDirectMessage = exports.accountRadiusOnPostDeleted = exports.accountTotalRadiusOnPostWritten = exports.radiusHistoryOnPostCreated = exports.radiusDecay = exports.radiusDecayWorker = exports.radiusDecayDispatch = exports.radiusDecayIndexChanged = exports.repairMapDiscovery = exports.mapDiscoveryWorker = exports.mapDiscoveryEnqueue = exports.mapDiscoveryOwnerChanged = exports.mapDiscoveryEngagement = exports.mapDiscoveryPostChanged = exports.queryMapDiscovery = exports.recordPostEngagement = exports.notifyOnEngagement = exports.poplurPassOnProfileChange = exports.poplurPassWebService = exports.poplurOwnedCards = exports.poplurWalletPass = exports.verifyCardPurchase = void 0;
+exports.syntheticDailySimulation = exports.poplurAiApi = exports.cameraSceneScan = exports.premiumAiAssist = exports.generateRetroGame = exports.testSessionIngest = exports.testActivityControl = exports.refreshLiveNews = exports.liveNewsApi = exports.wardrobeGarmentApi = exports.meshyStatus = exports.meshyGenerate = exports.setAccountLocationPrivacy = exports.notifyOnDirectMessage = exports.accountRadiusOnPostDeleted = exports.accountTotalRadiusOnPostWritten = exports.radiusHistoryOnPostCreated = exports.radiusDecay = exports.radiusDecayWorker = exports.radiusDecayDispatch = exports.radiusDecayIndexChanged = exports.repairMapDiscovery = exports.mapDiscoveryWorker = exports.mapDiscoveryEnqueue = exports.mapDiscoveryOwnerChanged = exports.mapDiscoveryEngagement = exports.mapDiscoveryPostChanged = exports.queryMapDiscovery = exports.recordPostEngagement = exports.notifyOnEngagement = exports.notifyOnRadiusLoss = exports.poplurPassOnProfileChange = exports.poplurPassWebService = exports.poplurOwnedCards = exports.poplurWalletPass = exports.verifyCardPurchase = void 0;
 const sdk_1 = __importDefault(require("@anthropic-ai/sdk"));
 const admin = __importStar(require("firebase-admin"));
 const firebase_functions_1 = require("firebase-functions");
@@ -53,6 +53,8 @@ Object.defineProperty(exports, "poplurOwnedCards", { enumerable: true, get: func
 var walletPassWebService_1 = require("./walletPassWebService");
 Object.defineProperty(exports, "poplurPassWebService", { enumerable: true, get: function () { return walletPassWebService_1.poplurPassWebService; } });
 Object.defineProperty(exports, "poplurPassOnProfileChange", { enumerable: true, get: function () { return walletPassWebService_1.poplurPassOnProfileChange; } });
+var radiusLossNotifications_1 = require("./radiusLossNotifications");
+Object.defineProperty(exports, "notifyOnRadiusLoss", { enumerable: true, get: function () { return radiusLossNotifications_1.notifyOnRadiusLoss; } });
 var engagementNotifications_1 = require("./engagementNotifications");
 Object.defineProperty(exports, "notifyOnEngagement", { enumerable: true, get: function () { return engagementNotifications_1.notifyOnEngagement; } });
 var postEngagement_1 = require("./postEngagement");

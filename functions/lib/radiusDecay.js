@@ -63,8 +63,9 @@ const db = admin.firestore();
  * only as a migration/rollback path while dueDecayEnabled is false.
  */
 async function runRadiusDecay(nowMillis = Date.now(), dueReferences) {
-    const [simulation, master] = await Promise.all([
+    const [simulation, master, decayTrial] = await Promise.all([
         db.doc("testControl/syntheticDailySimulation").get(), db.doc("testControl/syntheticBrowserRunner").get(),
+        db.doc("testControl/radiusDecayTrial").get(),
     ]);
     const stressEnabled = simulation.data()?.enabled === true && master.data()?.enabled === true;
     const nowTimestamp = firestore_1.Timestamp.fromMillis(nowMillis);
@@ -105,7 +106,7 @@ async function runRadiusDecay(nowMillis = Date.now(), dueReferences) {
             // Retries see a future deadline and cannot debit the same hour twice.
             if (dueReferences) {
                 const parts = (0, postEngagementPolicy_1.postRadiusParts)(post, nowMillis);
-                if (parts.organic <= 0 && !(post.syntheticBeta === true && post.simulationRetentionVersion === 1 && parts.seed > 0)) {
+                if (parts.organic <= 0 && parts.seed <= 0) {
                     transaction.delete(queueRef);
                     return;
                 }
@@ -116,14 +117,17 @@ async function runRadiusDecay(nowMillis = Date.now(), dueReferences) {
                 stamped += 1;
                 return;
             }
-            const stressDecay = stressEnabled ? (0, syntheticRetentionPolicy_1.calculateSyntheticRetentionDecay)(post, nowMillis) : null;
-            const next = stressDecay ?? (0, postEngagementPolicy_1.calculateRadiusDecay)(post, nowMillis);
+            const ownerUid = (0, accountRadius_1.postOwnerUid)(post);
+            const trial = decayTrial.data()?.enabled === true ? decayTrial.data() : undefined;
+            const stressDecay = stressEnabled && !trial ? (0, syntheticRetentionPolicy_1.calculateSyntheticRetentionDecay)(post, nowMillis) : null;
+            const next = stressDecay ?? (0, postEngagementPolicy_1.calculateRadiusDecay)(post, nowMillis, undefined, trial);
             if (!next)
                 return;
             const before = (0, postEngagementPolicy_1.postRadiusParts)(post, nowMillis);
             transaction.update(ref, {
                 organicRadiusMeters: next.organicRadiusMeters,
-                ...(stressDecay ? { seedRadiusMeters: stressDecay.seedRadiusMeters } : {}),
+                ...(next.seedRadiusMeters != null ? { seedRadiusMeters: next.seedRadiusMeters } : {}),
+                ...(next.radiusMeters <= 0 ? { visibilityStatus: "expired", expiredAt: nowTimestamp, expiryReason: "radius-zero" } : {}),
                 radiusMeters: next.radiusMeters,
                 radius: next.radiusMeters,
                 decayedAt: nowTimestamp,
@@ -134,7 +138,6 @@ async function runRadiusDecay(nowMillis = Date.now(), dueReferences) {
             // delta, in the same transaction as the post it belongs to. An
             // aggregate that only ever grew would let an account keep claiming
             // ground its posts no longer hold.
-            const ownerUid = (0, accountRadius_1.postOwnerUid)(post);
             if (ownerUid) {
                 (0, accountRadius_1.addAccountClaimRadius)(transaction, db.collection("users").doc(ownerUid), (0, accountRadius_1.claimRadiusDeltaMeters)(before.organic, next.organicRadiusMeters));
             }
@@ -146,7 +149,7 @@ async function runRadiusDecay(nowMillis = Date.now(), dueReferences) {
                 writer: "radiusDecay",
                 previous: { radiusMeters: before.stored ?? before.total, organicRadiusMeters: before.organic },
                 next,
-                seedRadiusMeters: stressDecay?.seedRadiusMeters ?? before.seed,
+                seedRadiusMeters: next.seedRadiusMeters ?? before.seed,
                 boostedRadiusMeters: before.boost,
             })));
             if (stressDecay) {

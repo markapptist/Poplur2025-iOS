@@ -1,0 +1,25 @@
+if (!process.env.FIRESTORE_EMULATOR_HOST || !process.env.GCLOUD_PROJECT?.startsWith('demo-')) throw new Error('Emulator only');
+const assert = require('node:assert/strict'), admin = require('firebase-admin');
+admin.initializeApp({projectId:process.env.GCLOUD_PROJECT});
+const db=admin.firestore(), {Timestamp}=admin.firestore;
+(async()=>{
+ const now=Date.now(), past=now-100*86400000;
+ await db.doc('users/expiry-owner').set({username:'expiry-owner',claimRadiusMeters:20});
+ await db.doc('testControl/radiusDecayTrial').set({enabled:true,multiplier:5,effectiveAtMillis:past});
+ const ref=db.doc('posts/expiry-post');
+ await ref.set({userID:'expiry-owner',organicRadiusMeters:20,seedRadiusMeters:20,radiusMeters:40,decayedAt:Timestamp.fromMillis(past),visibilityStatus:'published'});
+ const q=require('../lib/radiusDecayQueue');await q.reconcileDecayPost(ref.id);
+ await q.runDecayShard(q.decayShard(ref.id),now);
+ assert.equal((await db.doc('users/expiry-owner').get()).data().claimRadiusMeters,0);
+ const post=(await ref.get()).data();assert.equal(post.radiusMeters,0);assert.equal(post.visibilityStatus,'expired');
+ await assert.rejects(()=>require('../lib/postEngagement').applyPostEngagement('viewer',{postId:ref.id,eventId:'expired_event_12345',kind:'like'}),e=>e.code==='failed-precondition');
+ const history=await ref.collection('radiusHistory').get();assert.equal(history.size,1);assert.equal(history.docs[0].data().delta,-40);
+ const notify=require('../lib/radiusLossNotifications').notifyOnRadiusLoss;
+ const event={data:history.docs[0],params:{postId:ref.id,historyId:history.docs[0].id}};
+ await notify.run(event);
+ const inbox=await db.collection('users/expiry-owner/notifications').get();assert.equal(inbox.size,1);assert.equal(inbox.docs[0].data().kind,'decrease');
+ await inbox.docs[0].ref.update({isUnread:false});await notify.run(event);
+ assert.equal((await inbox.docs[0].ref.get()).data().isUnread,false);
+ await q.runDecayShard(q.decayShard(ref.id),now);assert.equal((await ref.collection('radiusHistory').get()).size,1);
+ console.log('Expiry transaction and deduplicated loss inbox passed');
+})().catch(e=>{console.error(e);process.exitCode=1}).finally(()=>admin.app().delete());

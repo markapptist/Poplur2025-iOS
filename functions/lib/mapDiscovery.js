@@ -176,23 +176,23 @@ async function rebuildMapSummary(kind, key, cohort) {
         }
         else if (tile.z === mapDiscoveryPolicy_1.REGION_DEPTH) {
             const children = await tx.get(db.collection('mapCellSummaries').where('cohort', '==', cohort).where('leaf', '==', key).limit(192));
-            candidates = children.docs.flatMap(d => d.data().winner || []);
+            candidates = children.docs.flatMap(d => summaryCandidates(d.data()));
         }
         else {
             const children = await tx.getAll(...(0, mapDiscoveryPolicy_1.regionChildren)(tile).map(r => db.doc(`mapRegionSummaries/${cohort}_${(0, mapDiscoveryPolicy_1.regionId)(r)}`)));
-            candidates = children.flatMap(d => d.data()?.winner || []);
+            candidates = children.flatMap(d => summaryCandidates(d.data()));
         }
         const old = previous.data();
         const choice = (0, mapDiscoveryPolicy_1.chooseChampion)(candidates, old || {}, now, Boolean(cell));
         const alternates = candidates.filter(c => c.expiresAtMillis > now && c.postId !== choice.winner?.postId)
-            .sort((a, b) => b.rankKey - a.rankKey).slice(0, 2);
+            .sort((a, b) => b.rankKey - a.rankKey).slice(0, 4);
         const next = { ...choice, alternates, updatedAtMillis: now, cohort, ...(cell ? { leaf: (0, mapDiscoveryPolicy_1.regionId)(tile) } : {}) };
         tx.set(target, next);
         const winner = choice.winner;
         const qualificationEnds = winner && (0, mapDiscoveryPolicy_1.qualifiedWinner)(winner, now)
             ? winner.rankAt + Math.log(winner.exposure / 5) * (6 * 3600_000 / Math.LN2) + 1000 : Infinity;
         const nextDue = winner ? Math.min(winner.expiresAtMillis + 1000, qualificationEnds) : 0;
-        return { changed: JSON.stringify(old?.winner) !== JSON.stringify(next.winner), challenger: Boolean(choice.challengerId), nextDue };
+        return { changed: JSON.stringify(summaryCandidates(old)) !== JSON.stringify(summaryCandidates(next)), challenger: Boolean(choice.challengerId), nextDue };
     });
     if (result.changed && parent)
         await dirtyMapSummary('region', (0, mapDiscoveryPolicy_1.regionId)(parent), cohort, key, 5);
@@ -337,22 +337,26 @@ async function hydrateMapCandidates(candidates, uid, includeTest, now = Date.now
         row.username = String(owner.user.username || p.username || p.handle || '').slice(0, 80);
         if (cohort === 'test')
             row.syntheticBeta = true;
-        return [{ id: snap.id, row, competition: { cellId: c.cellId, cohort, status: (0, mapDiscoveryPolicy_1.qualifiedWinner)(c, now) ? 'winner' : 'new', score: c.rankKey } }];
+        return [{ id: snap.id, row, competition: { cellId: c.cellId, cohort, status: c.summaryLeader === false ? 'local' : (0, mapDiscoveryPolicy_1.qualifiedWinner)(c, now) ? 'winner' : 'new', score: c.rankKey } }];
     });
 }
 // Bounded warm-instance tile cache. Personalized payloads are never shared;
 // every response still rechecks live post/owner privacy and mutual blocks.
+function summaryCandidates(summary) {
+    return [...(summary?.winner ? [{ ...summary.winner, summaryLeader: true }] : []),
+        ...(summary?.alternates || []).map(c => ({ ...c, summaryLeader: false }))];
+}
 const summaryCache = new Map();
 async function readSummaryTiles(refs) {
     const now = Date.now(), missing = refs.filter(ref => (summaryCache.get(ref.path)?.until || 0) <= now);
     if (missing.length)
         for (const doc of await db.getAll(...missing)) {
             summaryCache.delete(doc.ref.path);
-            summaryCache.set(doc.ref.path, { until: now + 30_000, winner: doc.data()?.winner || null });
+            summaryCache.set(doc.ref.path, { until: now + 30_000, candidates: summaryCandidates(doc.data()) });
             while (summaryCache.size > 512)
                 summaryCache.delete(summaryCache.keys().next().value);
         }
-    return refs.flatMap(ref => summaryCache.get(ref.path)?.winner || []);
+    return refs.flatMap(ref => summaryCache.get(ref.path)?.candidates || []);
 }
 async function runMapDiscoveryQuery(uid, raw) {
     let input;
@@ -397,8 +401,8 @@ async function runMapDiscoveryQuery(uid, raw) {
         const cohorts = input.includeTest ? ['real', 'test'] : ['real'];
         const refs = ids.flatMap(id => cohorts.map(c => db.doc(`${collection}/${c}_${id}`)));
         const summaries = refs.length ? await readSummaryTiles(refs) : [];
-        // At most one leader per tile and cohort. Alternates are NOT mislabeled as
-        // winners; privacy failures disappear until the async election catches up.
+        // Include nearby alternatives as regular pins; only the elected leader gets
+        // winner styling. Every candidate still passes live privacy checks.
         candidates = summaries.filter(c => c.expiresAtMillis > Date.now()).slice(0, mapDiscoveryPolicy_1.MAX_MAP_FEATURES);
     }
     if (input.selectedPostId && candidates.length < mapDiscoveryPolicy_1.MAX_MAP_FEATURES) {

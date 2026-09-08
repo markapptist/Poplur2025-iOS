@@ -242,9 +242,12 @@ function radiusDelta(kind, nowMillis, actor, isOwner) {
  * less than a minute elapsed, or rounding produced no change. The clock is
  * post.decayedAt, server-owned; boost never decays and is re-added on top.
  */
-function calculateRadiusDecay(post, nowMillis, ratePerDay = exports.RADIUS_DECAY_PER_DAY) {
+function calculateRadiusDecay(post, nowMillis, ratePerDay = exports.RADIUS_DECAY_PER_DAY, trial) {
+    if (trial && (!Number.isFinite(trial.multiplier) || trial.multiplier < 1 || trial.multiplier > 10
+        || !Number.isFinite(trial.effectiveAtMillis)))
+        trial = undefined;
     const radius = currentRadius(post, nowMillis);
-    if (radius.organic <= 0)
+    if (radius.organic <= 0 && !(trial && radius.seed > 0))
         return null;
     const decayedAtMillis = timestampMillis(post.decayedAt);
     if (decayedAtMillis == null)
@@ -252,20 +255,28 @@ function calculateRadiusDecay(post, nowMillis, ratePerDay = exports.RADIUS_DECAY
     const elapsedMs = nowMillis - decayedAtMillis;
     if (elapsedMs < 60_000)
         return null;
-    const factor = Math.pow(1 - ratePerDay, elapsedMs / 86_400_000);
+    const multiplier = trial && Number.isFinite(trial.multiplier) && trial.multiplier >= 1 && trial.multiplier <= 10
+        && Number.isFinite(trial.effectiveAtMillis) ? trial.multiplier : 1;
+    const trialElapsedMs = trial ? Math.max(0, nowMillis - Math.max(decayedAtMillis, trial.effectiveAtMillis)) : 0;
+    const weightedElapsedMs = elapsedMs + trialElapsedMs * (multiplier - 1);
+    const factor = Math.pow(1 - ratePerDay, weightedElapsedMs / 86_400_000);
     let organic = Math.floor(radius.organic * factor);
     if (organic < exports.RADIUS_DECAY_FLOOR_METERS)
         organic = 0;
-    if (organic >= radius.organic)
+    // The trial expires the free discovery grant too; otherwise every post
+    // would keep a permanent seed even after all its earned reach was gone.
+    const seedFactor = Math.pow(1 - ratePerDay, trialElapsedMs * multiplier / 86_400_000);
+    let seed = trial ? Math.floor(radius.seed * seedFactor) : radius.seed;
+    if (trial && seed < exports.RADIUS_DECAY_FLOOR_METERS)
+        seed = 0;
+    if (organic >= radius.organic && seed >= radius.seed)
         return null;
-    // Reach is seed + earned + boost everywhere else (see the engagement
-    // mutation below). Decay shrinks ONLY the earned part; the seed and the
-    // boost ride on top unchanged. This used to drop the seed, so a seeded
-    // post lost its 5 km discovery window on its first decay tick — production
-    // showed 6,750 m → 1,726 m with seedRadiusMeters still 5,000 on the doc.
+    // Keep the stored component sum exact. Outside the trial the seed is
+    // preserved; active paid boosts retain their existing expiry policy.
     return {
         organicRadiusMeters: organic,
-        radiusMeters: Math.min(exports.MAX_POST_RADIUS_METERS, organic + radius.boost + radius.seed),
+        ...(trial ? { seedRadiusMeters: seed } : {}),
+        radiusMeters: Math.min(exports.MAX_POST_RADIUS_METERS, organic + radius.boost + seed),
     };
 }
 /** Accepts the legacy bare `lastViewAtMillis` so existing callers/tests that
