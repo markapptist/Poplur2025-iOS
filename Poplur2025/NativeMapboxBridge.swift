@@ -205,7 +205,11 @@ enum PoplurNativeMapbox {
         case "removeFeatureState":
             let target = object(0)
             style.removeFeatureState(sourceId: target["source"] as? String ?? "",sourceLayerId: target["sourceLayer"] as? String,featureId: "\(target["id"] ?? "")",stateKey:arg(1) as? String) { _ in }
-        case "fog": try style.setAtmosphere(properties: object(0))
+        case "fog":
+            // A null web fog removes atmosphere. Converting it to an empty
+            // object enables Mapbox's default white haze over the clay paints.
+            if arg(0) is NSNull { try style.removeAtmosphere() }
+            else { try style.setAtmosphere(properties: object(0)) }
         case "config": if style.styleImports.contains(where: { $0.id == text(0) }) { try style.setStyleImportConfigProperty(for:text(0),config:text(1),value:arg(2)) }
         case "repaint": style.triggerRepaint()
         case "fov": break // Ground pins use the SDK's exact projection samples.
