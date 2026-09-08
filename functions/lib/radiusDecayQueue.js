@@ -33,10 +33,11 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.radiusDecayWorker = exports.radiusDecayDispatch = exports.radiusDecayIndexChanged = exports.decayShard = void 0;
+exports.radiusDecayWorker = exports.radiusDecayDispatch = exports.DECAY_DISPATCH_CANDIDATE_LIMIT = exports.DECAY_DISPATCH_INTERVAL_MS = exports.radiusDecayIndexChanged = exports.decayShard = void 0;
 exports.needsDecay = needsDecay;
 exports.reconcileDecayPost = reconcileDecayPost;
 exports.runDecayShard = runDecayShard;
+exports.dispatchDueDecay = dispatchDueDecay;
 const admin = __importStar(require("firebase-admin"));
 const crypto_1 = require("crypto");
 const functions_1 = require("firebase-admin/functions");
@@ -86,15 +87,29 @@ async function runDecayShard(shard, now = Date.now(), pages = 5) {
     }
     return processed;
 }
-exports.radiusDecayDispatch = (0, scheduler_1.onSchedule)({ schedule: 'every 1 minutes', region, timeoutSeconds: 60, cpu: 'gcf_gen1', maxInstances: 1 }, async () => {
-    const config = (await db.doc('mapDiscovery/config').get()).data();
-    if (config?.dueDecayEnabled !== true)
-        return;
-    const minute = Math.floor(Date.now() / 60000), first = (minute % 8) * 32;
-    await Promise.all(Array.from({ length: 32 }, (_, i) => (0, functions_1.getFunctions)().taskQueue(`locations/${region}/functions/radiusDecayWorker`)
-        .enqueue({ shard: first + i }, { id: (0, crypto_1.createHash)('sha256').update(`decay:${minute}:${first + i}`).digest('hex'), dispatchDeadlineSeconds: 300 })
-        .catch(e => { if (e.code !== 'functions/task-already-exists')
-        throw e; })));
+exports.DECAY_DISPATCH_INTERVAL_MS = 5 * 60_000;
+exports.DECAY_DISPATCH_CANDIDATE_LIMIT = 256;
+/** Find actual due work before launching workers. An idle beta used to
+ * launch 46,080 workers/day, each reading configuration and an empty shard.
+ * Oldest-first selection drains a backlog across ticks without a full scan;
+ * each selected worker can drain up to 1,000 posts in its shard. */
+async function dispatchDueDecay(store = db, enqueue = (shard, id) => (0, functions_1.getFunctions)().taskQueue(`locations/${region}/functions/radiusDecayWorker`)
+    .enqueue({ shard }, { id, dispatchDeadlineSeconds: 300 }), now = Date.now()) {
+    if ((await store.doc('mapDiscovery/config').get()).data()?.dueDecayEnabled !== true)
+        return { candidates: 0, dispatched: 0 };
+    const due = await store.collection('radiusDecayQueue')
+        .where('dueAt', '<=', firestore_1.Timestamp.fromMillis(now)).orderBy('dueAt')
+        .limit(exports.DECAY_DISPATCH_CANDIDATE_LIMIT).select('shard').get();
+    const shards = [...new Set(due.docs.map(d => d.data().shard))]
+        .filter((shard) => Number.isInteger(shard) && shard >= 0 && shard < 256);
+    const slot = Math.floor(now / exports.DECAY_DISPATCH_INTERVAL_MS);
+    await Promise.all(shards.map(shard => enqueue(shard, (0, crypto_1.createHash)('sha256').update(`due-decay:${slot}:${shard}`).digest('hex'))
+        .catch(error => { if (error.code !== 'functions/task-already-exists')
+        throw error; })));
+    return { candidates: due.size, dispatched: shards.length };
+}
+exports.radiusDecayDispatch = (0, scheduler_1.onSchedule)({ schedule: 'every 5 minutes', region, timeoutSeconds: 60, cpu: 'gcf_gen1', maxInstances: 1 }, async () => {
+    console.log('[radiusDecayDispatch]', await dispatchDueDecay());
 });
 exports.radiusDecayWorker = (0, tasks_1.onTaskDispatched)({ region, timeoutSeconds: 300, memory: '256MiB', cpu: 1, concurrency: 8, maxInstances: 2, retryConfig: { maxAttempts: 8, minBackoffSeconds: 10, maxBackoffSeconds: 300 }, rateLimits: { maxConcurrentDispatches: 16, maxDispatchesPerSecond: 16 } }, async (request) => {
     const shard = request.data?.shard;

@@ -10,6 +10,7 @@
     "lint": "tsc --noEmit",
     "test:test-activity": "npm run build && node scripts/testTestActivityPrivacy.js",
     "test:synthetic-runner": "npm run build && node scripts/testSyntheticBrowserRunner.js",
+    "test:beta-costs": "npm run build && firebase emulators:exec --project demo-poplur-beta-costs --config ../firebase.beta-local.json --only firestore,auth \"node scripts/testBetaCostControls.js\"",
     "test:synthetic-reset": "node scripts/testSyntheticBetaReset.js",
     "test:vertex-image-fallback": "npm run build && node scripts/testVertexImageFallback.js",
     "test:account-claim-radius": "npm run build && node scripts/testAccountClaimRadius.js",
