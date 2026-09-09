@@ -37,6 +37,19 @@ private enum FirebaseBootstrap {
 
         FirebaseApp.configure()
 
+        #if DEBUG
+        // Firebase prints the App Check debug token ONLY to the system console,
+        // which is unreachable from a script here: `log stream --device-name` no
+        // longer exists on macOS 26 and devicectl has no console subcommand. So a
+        // debug build mirrors it into the diag log, which IS pullable over
+        // devicectl, and registering a QA handset stops needing a human with
+        // Xcode open. DEBUG only — a release build must never print a token that
+        // would let anyone forge attestation against the enforcing callables.
+        if let app = FirebaseApp.app(), let debugProvider = AppCheckDebugProvider(app: app) {
+            PoplurDiagLog.append("[AppCheck] debug token: \(debugProvider.localDebugToken())")
+        }
+        #endif
+
         // Disable Firestore offline persistence in simulator to avoid disk space issues.
         #if targetEnvironment(simulator)
         let settings = FirestoreSettings()
