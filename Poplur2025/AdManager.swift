@@ -16,6 +16,12 @@ final class AdManager: NSObject, FullScreenContentDelegate {
     private weak var pendingPresenter: UIViewController?
     private var pendingExpiry: DispatchWorkItem?
     private var isPresenting = false
+    /// The earliest an interstitial may show again. The per-post cadence alone
+    /// put one on screen every second advance; a floor in TIME is what that
+    /// cadence cannot express, and it is the standard control for full-screen
+    /// inventory. Kept identical to Android's MIN_INTERSTITIAL_GAP_MS.
+    private var nextInterstitialAllowedAt: Date = .distantPast
+    private static let minimumInterstitialGap: TimeInterval = 180
     private var interstitialUnitID: String? {
         guard let value = Bundle.main.object(
             forInfoDictionaryKey: "PoplurAdMobInterstitialUnitID"
@@ -47,6 +53,14 @@ final class AdManager: NSObject, FullScreenContentDelegate {
         }
         hasStarted = true
         PoplurDiagLog.append("[Ads] SDK starting with configured production unit")
+        // Cap the creative's Digital Content Label. Precisely: the labels are
+        // ordered MA < T < PG < G, so .teen excludes ONLY the MA bucket. It is
+        // NOT a category filter and does NOT reliably keep gambling out —
+        // social-casino and betting creatives are routinely labelled T. The
+        // control that actually governs that category is console-side: AdMob →
+        // Blocking controls → Sensitive categories → "Gambling & betting".
+        // This narrows the ceiling; it does not close the category.
+        MobileAds.shared.requestConfiguration.maxAdContentRating = .teen
         MobileAds.shared.start { [weak self] _ in
             DispatchQueue.main.async {
                 self?.sdkReady = true
@@ -90,6 +104,10 @@ final class AdManager: NSObject, FullScreenContentDelegate {
     }
     
     func presentInterstitial(from root: UIViewController) {
+        guard Date() >= nextInterstitialAllowedAt else {
+            cancelPendingPresentation()
+            return
+        }
         guard UIApplication.shared.applicationState == .active, !isPresenting else {
             cancelPendingPresentation()
             return
@@ -117,6 +135,7 @@ final class AdManager: NSObject, FullScreenContentDelegate {
             pendingExpiry = nil
             pendingPresenter = nil
             isPresenting = true
+            nextInterstitialAllowedAt = Date().addingTimeInterval(Self.minimumInterstitialGap)
             ad.fullScreenContentDelegate = self
             PoplurDiagLog.append("[Ads] presenting at Feed transition")
             ad.present(from: presenter)
@@ -203,6 +222,10 @@ final class AdManager: NSObject, FullScreenContentDelegate {
     }
     
     func ad(_ ad: FullScreenPresentingAd, didFailToPresentFullScreenContentWithError error: Error) {
+        // Nothing was shown, so the floor has nothing to space out. Leaving it
+        // armed would spend three minutes of inventory on an impression that
+        // never happened.
+        nextInterstitialAllowedAt = .distantPast
         presentingAd = nil
         PoplurDiagLog.append("[Ads] presentation failed: \(error.localizedDescription)")
         isPresenting = false
