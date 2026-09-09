@@ -43,6 +43,15 @@ final class PoplurManagedWebView: WKWebView {
     var onRuntimeActiveChange: ((Bool) -> Void)?
     var onForegroundVisibilityChange: ((Bool) -> Void)?
     private var lastReportedRuntimeActive: Bool?
+    /// The exact governed-policy script this document was last given. Every
+    /// refresh path (renderer callback, visibility change, lifecycle return,
+    /// document ready) funnels into `applyLatestPolicyToDocument`, and most of
+    /// them carry no change at all — the same lease, re-stated. Each re-state
+    /// still crossed into JavaScript and fired `poplur-performance-policy`,
+    /// which the map answers by re-deciding its building layers: measured on
+    /// the iPhone, 124 identical broadcasts in 20 seconds during one landmark
+    /// tour. Hold what was sent and stay quiet when it has not moved.
+    private var lastAppliedPolicyScript: String?
     private var lastReportedForegroundVisible: Bool?
 
     /// Real UIKit visibility, deliberately independent of renderer/media
@@ -163,6 +172,7 @@ final class PoplurManagedWebView: WKWebView {
         onForegroundVisibilityChange?(false)
         lastReportedRuntimeActive = false
         lastReportedForegroundVisible = false
+        lastAppliedPolicyScript = nil
         performanceRegistration?.setVisible(false)
         performanceRegistration?.invalidate()
         performanceRegistration = nil
@@ -277,6 +287,12 @@ final class PoplurManagedWebView: WKWebView {
             onPurgeInactiveResources: { [weak self] in
                 guard let self else { return }
                 self.setAllMediaPlaybackSuspended(true, completionHandler: nil)
+                // The purge closes the runtime from JavaScript's side without
+                // going through `updateScript`, so the document no longer holds
+                // what the send-once memo says it does. Forget it, or the next
+                // identical lease would be skipped and leave this document
+                // paused for the rest of its life.
+                self.lastAppliedPolicyScript = nil
                 self.evaluateJavaScript(PoplurWebPerformance.purgeScript)
             }
         )
@@ -311,6 +327,10 @@ final class PoplurManagedWebView: WKWebView {
         // A navigation replaces the JavaScript world. The bootstrap starts
         // closed, then asks native for the current lease so a stale document-
         // creation snapshot can never create a second active heavy renderer.
+        // The new world has been told nothing yet, so the send-once memo above
+        // must be cleared here or this document would inherit its predecessor's
+        // policy without ever receiving it.
+        lastAppliedPolicyScript = nil
         applyLatestPolicyToDocument()
     }
 
@@ -322,7 +342,10 @@ final class PoplurManagedWebView: WKWebView {
             onRuntimeActiveChange?(active)
         }
         setAllMediaPlaybackSuspended(!active, completionHandler: nil)
-        evaluateJavaScript(PoplurWebPerformance.updateScript(policy: latestPolicy, active: active))
+        let script = PoplurWebPerformance.updateScript(policy: latestPolicy, active: active)
+        guard script != lastAppliedPolicyScript else { return }
+        lastAppliedPolicyScript = script
+        evaluateJavaScript(script)
     }
 }
 
