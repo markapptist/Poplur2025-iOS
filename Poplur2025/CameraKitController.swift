@@ -1314,6 +1314,41 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
         }
     }
 
+    /// Re-run autofocus on the centre of the frame, once.
+    ///
+    /// The session has always used AVFoundation's default `.continuousAutoFocus`
+    /// and never set `focusPointOfInterest`, so the lens was already refocusing
+    /// on its own — the web's focus square was pure decoration drawn over a
+    /// lens nobody was driving. This is the web asking for a real one: a
+    /// centre-weighted single-shot AF, after which the device returns to
+    /// continuous on its own.
+    ///
+    /// It is deliberately a no-op on hardware that cannot do it (front TrueDepth
+    /// on some devices reports no focus support), rather than throwing, because
+    /// the caller is a timer and a failure every few seconds is noise.
+    func refocusCentre() {
+        sessionQueue.async { [weak self] in
+            guard let self, let device = self.currentVideoInput?.device else { return }
+            guard device.isFocusModeSupported(.autoFocus) else { return }
+            do {
+                try device.lockForConfiguration()
+                if device.isFocusPointOfInterestSupported {
+                    device.focusPointOfInterest = CGPoint(x: 0.5, y: 0.5)
+                }
+                device.focusMode = .autoFocus
+                if device.isExposurePointOfInterestSupported {
+                    device.exposurePointOfInterest = CGPoint(x: 0.5, y: 0.5)
+                }
+                if device.isExposureModeSupported(.continuousAutoExposure) {
+                    device.exposureMode = .continuousAutoExposure
+                }
+                device.unlockForConfiguration()
+            } catch {
+                print("❌ [CameraKitController] Failed to refocus: \(error)")
+            }
+        }
+    }
+
     @MainActor
     @objc func flipCamera() {
         currentCameraPosition = currentCameraPosition == .front ? .back : .front

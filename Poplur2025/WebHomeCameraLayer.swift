@@ -578,6 +578,10 @@ final class WebHomeCameraModel: ObservableObject {
                     guard let self, self.isCameraTab else { return }
                     await self.resolveController().resumePreviewFromUserGesture()
                 }
+            case "refocus":
+                // The web's focus square now drives a REAL autofocus rather
+                // than only drawing itself. See CameraKitController.refocusCentre.
+                resolveController().refocusCentre()
             case "detect":
                 // ML detection ships on — activateCamera turns it on every time
                 // the camera tab opens — but the DETECT toggle lives in the web

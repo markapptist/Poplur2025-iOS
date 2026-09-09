@@ -62,7 +62,11 @@ enum WebCameraRollProvider {
             imageOptions.isNetworkAccessAllowed = false
 
             let manager = PHImageManager.default()
-            let side = thumbSide * UIScreen.main.scale / 2
+            // Ask for the tile's REAL pixels. This used to halve the request,
+            // so every tile was delivered at half the resolution it is drawn at
+            // and the grid upscaled it — the roll looked soft and pixelated
+            // against the same pictures in Photos.
+            let side = thumbSide * UIScreen.main.scale
             var items: [[String: Any]] = []
             assets.enumerateObjects { asset, _, _ in
                 guard asset.mediaType == .image || asset.mediaType == .video else { return }
@@ -72,7 +76,10 @@ enum WebCameraRollProvider {
                     contentMode: .aspectFill,
                     options: imageOptions
                 ) { image, _ in
-                    if let data = image?.jpegData(compressionQuality: 0.7) {
+                    // 0.7 was visibly lossy on the flat, hard-edged artwork the
+                    // roll is full of (icons, screenshots, UI captures), where
+                    // JPEG ringing shows worst.
+                    if let data = image?.jpegData(compressionQuality: 0.85) {
                         var item: [String: Any] = [
                             "kind": asset.mediaType == .video ? "video" : "photo",
                             "src": "data:image/jpeg;base64,\(data.base64EncodedString())",
