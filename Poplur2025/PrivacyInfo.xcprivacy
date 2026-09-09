@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The app performs no ATT-defined tracking. AppTrackingTransparency is not
+	     linked, there is no NSUserTrackingUsageDescription, no first-party code
+	     touches the IDFA, and not one bundled SDK manifest declares
+	     NSPrivacyTracking=true or names a tracking domain. Google Mobile Ads
+	     therefore serves non-personalised. Do not flip this to true without also
+	     adding ATT and a usage string, or the declaration becomes false. -->
+	<key>NSPrivacyTracking</key>
+	<false/>
+
+	<!-- Must stay empty while NSPrivacyTracking is false: any domain listed here
+	     is blocked by the OS unless ATT permission is granted, which this app
+	     never asks for. Listing ad domains would silently stop ad delivery. -->
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+
+	<!-- Scope note for whoever edits this next: the target uses an Xcode 16
+	     synchronized folder, and its membershipExceptions exclude only five
+	     files. Every other Swift file under Poplur2025/ compiles into the
+	     binary, including the PoplurWebHome-orphaned screens. ITMS-91053 is a
+	     static scan of the binary, not a reachability analysis, so "that code
+	     is unreachable" is not a reason to leave a category out. -->
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<!-- UserDefaults.standard across 35 compiled files: theme, cube skin,
+		     alternate app icon, launch timings, onboarding and WebView bridge
+		     state. No suiteName anywhere, no App Group entitlement, so this is
+		     strictly the app's own storage. -->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+			</array>
+		</dict>
+
+		<!-- FileManager attributes and URLResourceValues for size and
+		     modification date, on the app's own bundle and its Documents and
+		     Caches containers: asset-cache accounting, derivative pruning, log
+		     trimming. No user-granted file's metadata is read and no timestamp
+		     is shown to the user. -->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>C617.1</string>
+			</array>
+		</dict>
+
+		<!-- ProcessInfo.systemUptime used only as a monotonic clock to rate-limit
+		     motion delivery, AR filter and camera work. Nothing derived from it
+		     leaves the device. -->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategorySystemBootTime</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>35F9.1</string>
+			</array>
+		</dict>
+
+		<!-- Not first-party: no Swift in this repo touches disk space. It comes
+		     from a statically linked SPM dependency merged into the executable —
+		     `nm -u` on the submitted binary shows _NSFileSystemFreeSize and
+		     _NSFileSystemSize, and the attributesOfFileSystemForPath: selector
+		     is present. Apple's scan reads the merged binary, so it must be
+		     declared here even though we never call it. 85F4.1 is the fit: the
+		     SDKs check for room before writing their buffered data. -->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryDiskSpace</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>85F4.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

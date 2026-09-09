@@ -581,7 +581,7 @@
 				INFOPLIST_KEY_NSCameraUsageDescription = "We need camera access to let you capture photos and videos for your posts.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "We use your location to tag posts on the map and show nearby content.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "“We use the microphone to record audio with your videos.”";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Poplur uses speech recognition so you can talk to the app with Hey Poplur and dictate instead of typing.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Poplur uses speech recognition to turn what you say into text when you dictate a message to Poplur AI.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "We need permission to save your captured media to your photo library.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We need photo library access so you can choose photos and videos to post.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -627,7 +627,7 @@
 				INFOPLIST_KEY_NSCameraUsageDescription = "We need camera access to let you capture photos and videos for your posts.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "We use your location to tag posts on the map and show nearby content.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "“We use the microphone to record audio with your videos.”";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Poplur uses speech recognition so you can talk to the app with Hey Poplur and dictate instead of typing.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Poplur uses speech recognition to turn what you say into text when you dictate a message to Poplur AI.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "We need permission to save your captured media to your photo library.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We need photo library access so you can choose photos and videos to post.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
