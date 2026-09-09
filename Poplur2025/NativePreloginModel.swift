@@ -149,7 +149,12 @@ final class NativePreloginModel: ObservableObject {
             error = Self.credentialsError(email: email, password: password, confirmation: confirmation, birthday: birthdayChosen ? birthday : nil, agreed: agreed)
             guard error == nil else { return }
         }
-        if accountType == .user && (photo == nil || !["male", "female"].contains(gender)) { error = "Choose your profile photo and cube head."; return }
+        // The photo is OPTIONAL, and the save below already treats it that way
+        // (`if let photo` at the upload). Requiring one here made a device with an
+        // empty photo library unable to create an account at all - the picker is
+        // the only source, there is no camera path and there was no skip. App
+        // Review runs on exactly such a device, and could not get past this screen.
+        if accountType == .user && !["male", "female"].contains(gender) { error = "Pick the clay head your cube wears."; return }
         if accountType == .business && (place == nil || businessCategory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || proof.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) { error = "Choose your business, category, and verification details."; return }
         guard FirebaseApp.app() != nil else { error = "Sign-up is unavailable. Please reopen Poplur."; return }
         busy = true; error = nil; auth.isCompletingOnboarding = true

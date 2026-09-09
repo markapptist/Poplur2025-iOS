@@ -158,12 +158,16 @@ struct NativePreloginView: View {
             Toggle("I agree to the Terms of Service", isOn: $model.agreed).tint(.pink).font(.system(size: 13, weight: .semibold)).foregroundStyle(cream).accessibilityIdentifier("agreeTerms")
             clayButton("Create account", id: "credentialsNext", action: model.advanceCredentials)
         case .photo:
-            heading("Add a profile photo"); subtitle("Show your radius who you are.")
+            heading("Add a profile photo"); subtitle("Show your radius who you are. You can add one later in Settings · Profile.")
             PhotosPicker(selection: $photoItem, matching: .images) {
                 Group { if let image = model.photo { Image(uiImage: image).resizable().scaledToFill() } else { Image(systemName: "plus").font(.system(size: 44, weight: .heavy)).foregroundStyle(.pink).frame(maxWidth: .infinity, maxHeight: .infinity).background(cream) } }.frame(width: 120, height: 120).clipShape(Circle()).overlay(Circle().stroke(.white, lineWidth: 3)).shadow(radius: 5, y: 4)
             }.accessibilityLabel("Upload photo")
             subtitle("Upload photo")
-            clayButton("Continue", id: "photoNext") { if model.photo == nil { model.error = "Add a profile photo to continue." } else { model.go(.gender) } }
+            // One control, and it says which of the two things it is doing. A hard
+            // "Add a profile photo to continue." here was a dead end on any device
+            // with an empty photo library, because the picker above is the only way
+            // to supply one.
+            clayButton(model.photo == nil ? "Skip for now" : "Continue", id: "photoNext") { model.go(.gender) }
         case .gender:
             heading("Is your cube male or female?"); subtitle("Pick the clay head your profile cube wears.")
             choice("Male", detail: "The original mark head", asset: "poplur_mark_head_navigator", selected: model.gender == "male") { model.gender = "male"; Task { await model.submit(auth: auth) } }
