@@ -133,6 +133,8 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     /// preview remains continuously visible. Owned and invalidated on the
     /// serial session queue so a parked camera retains no device observer.
     private var systemPressureObservation: NSKeyValueObservation?
+    /// Torn down with the device input; the notification is per-device.
+    private var subjectAreaObserver: NSObjectProtocol?
     private var capturePressureCappedForCurrentLease = false
     private var performanceWantsCapture = false
     private var recordingDeadlineTask: DispatchWorkItem?
@@ -1432,6 +1434,7 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
             currentCameraPosition = device.position
             installSystemPressureObservationOnQueue(for: device)
             applyDefaultZoomOnQueue(to: device)
+            enableSubjectAreaMonitoringOnQueue(for: device)
 
             if captureSession.canAddOutput(photoOutput) {
                 captureSession.addOutput(photoOutput)
@@ -1558,6 +1561,35 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     private static func displayZoomBaseline(for device: AVCaptureDevice) -> CGFloat {
         device.virtualDeviceSwitchOverVideoZoomFactors.first
             .map { CGFloat(truncating: $0) } ?? 1
+    }
+
+    /// Ask the device to tell us when the scene's subject changes.
+    ///
+    /// This app has never configured focus at all, so every device it opens
+    /// runs AVFoundation's default `.continuousAutoFocus` - the lens is already
+    /// refocusing on its own. What was missing was any way to KNOW, which is
+    /// why the viewfinder's focus bracket only ever appeared under a finger.
+    /// Subject-area monitoring is the device's own notification, raised by the
+    /// ISP: no frames, no Vision, no CoreML, and in particular nothing that
+    /// would re-arm the ML detector that the scan toggle deliberately keeps
+    /// off.
+    private func enableSubjectAreaMonitoringOnQueue(for device: AVCaptureDevice) {
+        do {
+            try device.lockForConfiguration()
+            device.isSubjectAreaChangeMonitoringEnabled = true
+            device.unlockForConfiguration()
+        } catch {
+            print("❌ [CameraKitController] Failed to enable subject-area monitoring: \(error)")
+            return
+        }
+        subjectAreaObserver.map(NotificationCenter.default.removeObserver)
+        subjectAreaObserver = NotificationCenter.default.addObserver(
+            forName: AVCaptureDevice.subjectAreaDidChangeNotification,
+            object: device,
+            queue: .main,
+        ) { _ in
+            PostLoginHomeWebView.sendCameraSubjectAreaChanged()
+        }
     }
 
     /// Park a freshly configured device on UI 1× (the wide lens), not the

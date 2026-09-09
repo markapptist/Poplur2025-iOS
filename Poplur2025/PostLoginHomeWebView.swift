@@ -469,6 +469,21 @@ struct PostLoginHomeWebView: UIViewRepresentable {
 
     /// Hand the web overlay real boxes. JSON matches `Detection` in
     /// poplur-clay-map/src/mlDetect.ts: x/y/w/h normalised 0..1, top-left origin.
+    /// The lens has decided the subject changed and is refocusing.
+    ///
+    /// AVFoundation runs `.continuousAutoFocus` by default, so the camera has
+    /// always been refocusing on its own - the viewfinder just never said so,
+    /// and the focus bracket only ever answered a tap. This is the device's own
+    /// signal (`AVCaptureDeviceSubjectAreaDidChange`), which costs no frames,
+    /// no Vision and no CoreML, so the sight can follow the real lens instead
+    /// of asking the user to tap for something the hardware already did.
+    static func sendCameraSubjectAreaChanged() {
+        guard let webView = liveWebView else { return }
+        webView.evaluateJavaScript(
+            "window.dispatchEvent(new CustomEvent('poplur-native-camera-focus', { detail: { reason: 'subject' } })); true;"
+        )
+    }
+
     static func sendDetections(_ json: String) {
         guard let webView = liveWebView else { return }
         webView.evaluateJavaScript(
