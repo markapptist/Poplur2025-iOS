@@ -484,6 +484,34 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         )
     }
 
+    /// A face rectangle from the ISP's own metadata output, already converted
+    /// to preview space (0..1, top-left) by the preview layer, which is the
+    /// only object that knows the aspect-fill crop, the rotation and the front
+    /// camera's mirroring.
+    ///
+    /// Deliberately NOT `sendDetections`: that channel is SCAN's — the web
+    /// gates it on liveDetectionActive and feeds it to the label pills, the AR
+    /// costumes and recordScanDetections. This one carries a sight, nothing
+    /// more. JSONSerialization rather than interpolation so a NaN can never
+    /// emit invalid JS.
+    @MainActor
+    static func sendCameraFocusSubject(_ rect: CGRect?) {
+        guard let webView = liveWebView else { return }
+        var detail = "null"
+        if let rect,
+           rect.minX.isFinite, rect.minY.isFinite, rect.width.isFinite, rect.height.isFinite,
+           let data = try? JSONSerialization.data(withJSONObject: [
+               "x": Double(rect.minX), "y": Double(rect.minY),
+               "w": Double(rect.width), "h": Double(rect.height),
+           ]),
+           let json = String(data: data, encoding: .utf8) {
+            detail = json
+        }
+        webView.evaluateJavaScript(
+            "window.dispatchEvent(new CustomEvent('poplur-native-camera-subject', { detail: \(detail) })); true;"
+        )
+    }
+
     static func sendDetections(_ json: String) {
         guard let webView = liveWebView else { return }
         webView.evaluateJavaScript(

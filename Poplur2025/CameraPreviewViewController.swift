@@ -23,6 +23,35 @@ final class CameraPreviewViewController: UIViewController {
         return displayLayer
     }
 
+    /// A face rectangle from the ISP, in 0..1 of THIS VIEW, top-left origin.
+    ///
+    /// `transformedMetadataObject(for:)` is the right tool for an
+    /// AVMetadataObject specifically: the preview layer is the only object that
+    /// knows its own `.resizeAspectFill` crop, the rotation applied to its
+    /// connection, and the front camera's automatic mirroring, and it applies
+    /// all three. (The Vision path must NOT use it — those boxes are already
+    /// normalised and already mirrored, so it would transform them twice.)
+    ///
+    /// Main-thread only: CALayer is not thread-safe, and a conversion made off
+    /// the main queue returns numbers that look plausible and are wrong.
+    @MainActor
+    func normalizedPreviewRect(for metadataObject: AVMetadataObject) -> CGRect? {
+        guard let layer = previewLayer, layer.connection != nil else { return nil }
+        let bounds = layer.bounds
+        guard bounds.width > 0, bounds.height > 0 else { return nil }
+        guard let transformed = layer.transformedMetadataObject(for: metadataObject) else { return nil }
+        let rect = transformed.bounds
+        guard rect.width > 0, rect.height > 0,
+              rect.origin.x.isFinite, rect.origin.y.isFinite,
+              rect.width.isFinite, rect.height.isFinite else { return nil }
+        return CGRect(
+            x: (rect.minX - bounds.minX) / bounds.width,
+            y: (rect.minY - bounds.minY) / bounds.height,
+            width: rect.width / bounds.width,
+            height: rect.height / bounds.height,
+        )
+    }
+
     // Attach an AVCaptureSession to the base preview layer so raw camera shows immediately
     public func setCaptureSession(_ session: AVCaptureSession) {
         // LOAD THE VIEW FIRST. This used to test `previewLayer` before the view

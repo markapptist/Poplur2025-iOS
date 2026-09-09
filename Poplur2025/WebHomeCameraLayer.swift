@@ -107,6 +107,12 @@ final class WebHomeCameraModel: ObservableObject {
                 }
             }
         }
+        // The controller outlives the web Camera component, so a face rect must
+        // never be delivered to a document that has already left the post tab.
+        controller.onFaceSubjectChange = { [weak self] rect in
+            guard self?.isCameraTab == true else { return }
+            PostLoginHomeWebView.sendCameraFocusSubject(rect)
+        }
         controller.preparePreviewIfNeeded()
         controllerStorage = controller
         return controller

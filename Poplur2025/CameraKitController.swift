@@ -107,6 +107,22 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     private var currentVideoInput: AVCaptureDeviceInput?
     private var isSessionConfigured: Bool = false
 
+    // ── Hardware face rectangles ─────────────────────────────────────────────
+    // The ISP already runs a face detector for face-priority exposure and
+    // focus. Reading its metadata costs no frames, no Vision and no CoreML, so
+    // the focus sight can follow a real subject WITHOUT arming the ML detector
+    // that the scan toggle deliberately keeps off (arming it would bring the AI
+    // narration back with it).
+    private let faceMetadataOutput = AVCaptureMetadataOutput()
+    private let faceMetadataQueue = DispatchQueue(label: "com.poplur.camerakit.faceMetadata")
+    private var faceMetadataAttached = false
+    private var lastFaceMetadataPublish: CFTimeInterval = 0
+    private var lastPublishedFaceRect: CGRect?
+    /// Preview-space, 0..1, top-left origin. nil when the ISP sees no face.
+    /// Always delivered on the main queue.
+    var onFaceSubjectChange: ((CGRect?) -> Void)?
+    private static let faceMetadataInterval: CFTimeInterval = 1.0 / 8.0
+
     // Queues
     let sessionQueue: DispatchQueue = DispatchQueue(label: "com.poplur.camerakit.session")
     let videoOutputQueue: DispatchQueue = DispatchQueue(label: "com.poplur.camerakit.videoOutput")
@@ -667,6 +683,14 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
             }
             self.currentVideoInput = nil
             self.videoDataOutput = nil
+        // hardParkCapture strips every output, so the attached flag would
+        // otherwise outlive the output and let a later write raise
+        // NSInvalidArgumentException on a detached object.
+        if self.faceMetadataAttached {
+            self.faceMetadataOutput.setMetadataObjectsDelegate(nil, queue: nil)
+            self.faceMetadataAttached = false
+        }
+        self.lastPublishedFaceRect = nil
             self.previewConnection = nil
             self.isSessionConfigured = false
 
@@ -1444,6 +1468,21 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
                 captureSession.addOutput(movieOutput)
             }
 
+            // Face metadata. `availableMetadataObjectTypes` is empty until the
+            // output has a session, so the type list can only be set AFTER
+            // addOutput. If the device cannot offer faces, take the output back
+            // out rather than leaving a dead one on the session.
+            if !faceMetadataAttached, captureSession.canAddOutput(faceMetadataOutput) {
+                captureSession.addOutput(faceMetadataOutput)
+                if faceMetadataOutput.availableMetadataObjectTypes.contains(.face) {
+                    faceMetadataOutput.metadataObjectTypes = [.face]
+                    faceMetadataOutput.setMetadataObjectsDelegate(self, queue: faceMetadataQueue)
+                    faceMetadataAttached = true
+                } else {
+                    captureSession.removeOutput(faceMetadataOutput)
+                }
+            }
+
             [photoOutput.connection(with: .video), movieOutput.connection(with: .video)]
                 .compactMap { $0 }
                 .forEach(configureVideoConnection)
@@ -2059,6 +2098,53 @@ extension CameraKitController: AVCapturePhotoCaptureDelegate, AVCaptureFileOutpu
 }
 
 // MARK: - AR Filter Support & AVCaptureVideoDataOutputSampleBufferDelegate
+
+extension CameraKitController: AVCaptureMetadataOutputObjectsDelegate {
+    /// Called on `faceMetadataQueue` at roughly the capture rate. Two gates
+    /// before anything reaches the main thread: 8Hz, which is far more than a
+    /// focus sight needs, and a movement threshold, so a still face publishes
+    /// once and then goes quiet instead of jittering the bracket every beat.
+    func metadataOutput(
+        _ output: AVCaptureMetadataOutput,
+        didOutput metadataObjects: [AVMetadataObject],
+        from connection: AVCaptureConnection
+    ) {
+        let now = CACurrentMediaTime()
+        guard now - lastFaceMetadataPublish >= Self.faceMetadataInterval else { return }
+        lastFaceMetadataPublish = now
+        // The biggest face is the subject; a bystander behind them is not.
+        let face = metadataObjects
+            .compactMap { $0 as? AVMetadataFaceObject }
+            .max { $0.bounds.width * $0.bounds.height < $1.bounds.width * $1.bounds.height }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            // A parked or ungranted camera publishes nothing, exactly as the
+            // analysis path refuses to.
+            guard self.acceptsAnalysisResults else {
+                if self.lastPublishedFaceRect != nil {
+                    self.lastPublishedFaceRect = nil
+                    self.onFaceSubjectChange?(nil)
+                }
+                return
+            }
+            guard let face,
+                  let rect = self.cameraPreviewViewController.normalizedPreviewRect(for: face) else {
+                if self.lastPublishedFaceRect != nil {
+                    self.lastPublishedFaceRect = nil
+                    self.onFaceSubjectChange?(nil)
+                }
+                return
+            }
+            if let last = self.lastPublishedFaceRect {
+                let moved = abs(last.midX - rect.midX) + abs(last.midY - rect.midY)
+                let resized = abs(last.width - rect.width) + abs(last.height - rect.height)
+                guard moved > 0.02 || resized > 0.02 else { return }
+            }
+            self.lastPublishedFaceRect = rect
+            self.onFaceSubjectChange?(rect)
+        }
+    }
+}
 
 extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
     
