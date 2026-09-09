@@ -144,6 +144,22 @@ enum WebPostPublisher {
         PostUploadService.shared.nextPhotoViewSeconds = photoSeconds.flatMap {
             $0.isFinite && $0 > 0 ? Int(min(60, max(1, $0.rounded()))) : nil
         }
+        // Carousel slides after the cover. Index 0 is the cover and is already
+        // staged as the post's image — its bytes are the legacy `data` field —
+        // so it is skipped here rather than uploaded twice. A slide that fails
+        // to decode drops the whole carousel back to the cover instead of
+        // publishing a post with a hole in it.
+        PostUploadService.shared.nextCarouselExtras = {
+            guard let items = body["mediaItems"] as? [[String: Any]], items.count > 1 else { return [] }
+            let ordered = items.sorted { ($0["index"] as? Int ?? 0) < ($1["index"] as? Int ?? 0) }
+            var extras: [Data] = []
+            for item in ordered.dropFirst() {
+                guard let value = item["data"] as? String,
+                      let decoded = decodeDataURL(value) else { return [] }
+                extras.append(decoded)
+            }
+            return extras
+        }()
         PostUploadService.shared.nextCaption = body["caption"] as? String
         PostUploadService.shared.nextChannelID = body["channelId"] as? String
         PostUploadService.shared.nextRequestID = body["requestId"] as? String

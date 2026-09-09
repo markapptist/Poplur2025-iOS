@@ -58,6 +58,10 @@ final class PostUploadService {
         let usedAI: Bool
         let rightsAttestationVersion: String?
         let photoViewSeconds: Int?
+        /// Carousel slides AFTER the cover, already decoded, in display order.
+        /// The cover is `payload` — it keeps the unchanged storage path so an
+        /// old client reading mediaURL still finds a perfectly ordinary post.
+        let carouselExtras: [Data]
 
         func isDuplicate(of other: UploadRequest) -> Bool {
             // postID FIRST: it is the stable identity of one user intent, it
@@ -173,7 +177,8 @@ final class PostUploadService {
                     locationVisibility: publishContract.locationVisibility,
                     usedAI: publishContract.usedAI,
                     rightsAttestationVersion: publishContract.rightsAttestationVersion,
-                    photoViewSeconds: publishContract.photoViewSeconds
+                    photoViewSeconds: publishContract.photoViewSeconds,
+                    carouselExtras: takeCarouselExtras()
                 ))
             }
         })
@@ -212,7 +217,8 @@ final class PostUploadService {
                     locationVisibility: publishContract.locationVisibility,
                     usedAI: publishContract.usedAI,
                     rightsAttestationVersion: publishContract.rightsAttestationVersion,
-                    photoViewSeconds: publishContract.photoViewSeconds
+                    photoViewSeconds: publishContract.photoViewSeconds,
+                    carouselExtras: takeCarouselExtras()
                 ))
             }
         })
@@ -258,7 +264,8 @@ final class PostUploadService {
                         locationVisibility: publishContract.locationVisibility,
                         usedAI: publishContract.usedAI,
                         rightsAttestationVersion: publishContract.rightsAttestationVersion,
-                        photoViewSeconds: publishContract.photoViewSeconds
+                        photoViewSeconds: publishContract.photoViewSeconds,
+                    carouselExtras: takeCarouselExtras()
                     ))
                 } else if let videoURL = info["videoURL"] as? URL {
                     self.enqueue(UploadRequest(
@@ -268,7 +275,8 @@ final class PostUploadService {
                         locationVisibility: publishContract.locationVisibility,
                         usedAI: publishContract.usedAI,
                         rightsAttestationVersion: publishContract.rightsAttestationVersion,
-                        photoViewSeconds: publishContract.photoViewSeconds
+                        photoViewSeconds: publishContract.photoViewSeconds,
+                    carouselExtras: takeCarouselExtras()
                     ))
                 } else {
                     Self.report(success: false, message: "That post had no media to upload.", requestID: requestID)
@@ -370,7 +378,8 @@ final class PostUploadService {
                     locationVisibility: request.locationVisibility,
                     usedAI: request.usedAI,
                     rightsAttestationVersion: request.rightsAttestationVersion,
-                    photoViewSeconds: request.photoViewSeconds
+                    photoViewSeconds: request.photoViewSeconds,
+                    carouselExtras: request.carouselExtras
                 )
             case .video(let url):
                 try await upload(
@@ -442,6 +451,16 @@ final class PostUploadService {
         // shell already floors both cases this way (services/posts.ts); iOS
         // was the one publisher that still defaulted to nothing.
         return max(Self.postDiscoverySeedMeters, nextRadiusMeters ?? 0)
+    }
+
+    /// Set by WebPostPublisher from the one publishPost message, drained by the
+    /// upload that follows. Never accumulates across posts: a failed decode must
+    /// not leak this post's extra slides onto the next capture.
+    var nextCarouselExtras: [Data] = []
+    private func takeCarouselExtras() -> [Data] {
+        let extras = nextCarouselExtras
+        nextCarouselExtras = []
+        return extras
     }
 
     private func takeCaption() -> String? {
@@ -527,7 +546,8 @@ final class PostUploadService {
         locationVisibility: String,
         usedAI: Bool,
         rightsAttestationVersion: String?,
-        photoViewSeconds: Int?
+        photoViewSeconds: Int?,
+        carouselExtras: [Data] = []
     ) async throws {
         guard let data = image.poplur4KJPEGData() else {
             throw NSError(
@@ -557,11 +577,31 @@ final class PostUploadService {
         try Task.checkCancellation()
         Self.reportProgress(0.88, phase: "FINALIZING", requestID: requestID)
         let mediaURL = try await reference.downloadURL().absoluteString
+        // Carousel slides after the cover. Sequential on purpose: the progress
+        // reporter is a single 0...1 track, and a partial carousel is worse
+        // than a slower one - if any slide fails the whole post fails and
+        // nothing is written, rather than publishing a post missing slide 3.
+        var mediaURLs: [String] = [mediaURL]
+        for (offset, extra) in carouselExtras.enumerated() {
+            try Task.checkCancellation()
+            let index = offset + 1
+            let extraPath = "posts/\(uid)/\(postID)-\(index).jpg"
+            let extraReference = Storage.storage().reference().child(extraPath)
+            try await uploadData(
+                extra,
+                to: extraReference,
+                metadata: Self.storageMetadata(contentType: "image/jpeg"),
+                requestID: requestID,
+                progressRange: 0.88...0.92
+            )
+            mediaURLs.append(try await extraReference.downloadURL().absoluteString)
+        }
         Self.reportProgress(0.94, phase: "SAVING POST", requestID: requestID)
         do {
             try await savePost(
                 postID: postID,
                 mediaURL: mediaURL,
+                mediaURLs: mediaURLs,
                 mediaStoragePath: storagePath,
                 posterURL: nil,
                 posterStoragePath: nil,
@@ -736,6 +776,7 @@ final class PostUploadService {
     private func savePost(
         postID: String,
         mediaURL: String,
+        mediaURLs: [String] = [],
         mediaStoragePath: String,
         posterURL: String?,
         posterStoragePath: String?,
@@ -773,6 +814,13 @@ final class PostUploadService {
             "createdAt": FieldValue.serverTimestamp(),
             "createdAtMillis": Int64(Date().timeIntervalSince1970 * 1000)
         ]
+        // Only a real carousel writes these. mediaURL above stays the cover and
+        // keeps its original storage path, so a client that knows nothing about
+        // mediaURLs reads it and renders an ordinary single-photo post.
+        if mediaURLs.count > 1 {
+            post["mediaURLs"] = mediaURLs
+            post["mediaCount"] = mediaURLs.count
+        }
         guard let uid = Auth.auth().currentUser?.uid else {
             throw NSError(
                 domain: "PostUploadService",
