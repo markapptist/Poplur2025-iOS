@@ -938,7 +938,22 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
         if !preserveOutput, let unfinishedOutputURL {
             PoplurTemporaryFileOwnership.deleteIfOwned(unfinishedOutputURL)
         }
-        parkCamera(reason: reason, canResume: canResume, preserveLastFrame: true)
+        // A recording that ended normally — the user's stop or the ten-second
+        // cap — is not a reason to park a camera the user is still looking at.
+        // Visibility is the preview lease (see beginPreviewWindow); only a
+        // thermal tripwire, a lost rendering grant or a hidden surface keeps
+        // the sensor parked. Parking here left every clip followed by a black
+        // viewfinder and a "Camera ready to resume" card. The window is
+        // already open (recordingStarted opened it), so leaving it open is
+        // the whole change; the web only needs to hear `running` again.
+        if reason == .recordingFinished,
+           canResume,
+           !requiresEmergencyThermalPark,
+           performanceRegistration?.isGrantedRendering == true {
+            publishColdBudgetState(state: .running, reason: .recordingFinished, canResume: false)
+        } else {
+            parkCamera(reason: reason, canResume: canResume, preserveLastFrame: true)
+        }
         recordingStopRequested = false
     }
 
@@ -947,7 +962,12 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
         let settingsUniqueID = activePhotoSettingsUniqueID
         cancelPhotoHardDeadline(settingsUniqueID: settingsUniqueID)
         let hadPendingPark = parkAfterPhotoCapture
-        let shouldPark = photoOpenedItsOwnWindow || hadPendingPark || reason != nil
+        // A photo that opened its own window used to re-park with
+        // .windowExpired the moment it finished — the same black viewfinder
+        // and resume card, one tap after the user had just asked for the
+        // camera. Pending parks (left the tab, thermal) and explicit failure
+        // reasons still park; a successful capture never does.
+        let shouldPark = hadPendingPark || reason != nil
         let finalReason = hadPendingPark ? pendingPhotoParkReason : (reason ?? pendingPhotoParkReason)
         let finalCanResume = hadPendingPark ? pendingPhotoCanResume : true
         let finalPreserveLastFrame = hadPendingPark ? pendingPhotoPreserveLastFrame : true
