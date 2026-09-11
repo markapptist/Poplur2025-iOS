@@ -1795,7 +1795,16 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
            latestColdBudgetUpdate.reason == .entry,
            performanceRegistration?.isVisible == true,
            !requiresEmergencyThermalPark {
-            beginPreviewWindow(reason: .entry, explicitUserResume: false)
+            // Through startPreview, not beginPreviewWindow: the entry park's
+            // teardown may already have run, and it clears isReady and strips
+            // the session. beginPreviewWindow's first guard is isReady, so
+            // calling it here published .unavailable/cannot-resume — "Camera
+            // could not start" — instead of starting the camera. startPreview
+            // reconfigures if needed (a no-op when the teardown lost the lease
+            // race) and then opens the same .entry window.
+            Task { @MainActor [weak self] in
+                await self?.startPreview()
+            }
             return
         }
 
@@ -1834,11 +1843,20 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
                     self.attachVideoDataOutputOnQueue()
                 }
                 self.setVideoFrameDeliveryActiveOnQueue(dataProcessingAllowed)
-                guard self.applyCameraFrameRateOnQueue(effectiveFPS) else {
-                    DispatchQueue.main.async { [weak self] in
-                        self?.parkCamera(reason: .unavailable, canResume: true, preserveLastFrame: true)
+                // A failed frame-rate apply used to PARK the camera here as
+                // .unavailable — "Camera could not start", tap to retry — on
+                // every entry where the device lock was busy or the input was
+                // not yet attached. The rate is a power optimisation, not a
+                // prerequisite: the preview runs fine at the format's default.
+                // Start anyway, retry the rate once the graph is up, and let
+                // the diag log say what happened.
+                if !self.applyCameraFrameRateOnQueue(effectiveFPS) {
+                    PoplurDiagLog.append("[PoplurCamera] frameRate deferred: starting at the format default, retry in 350ms")
+                    self.sessionQueue.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                        guard let self,
+                              self.captureLeaseMatches(generation: captureGeneration, desired: true) else { return }
+                        _ = self.applyCameraFrameRateOnQueue(effectiveFPS)
                     }
-                    return
                 }
                 guard self.captureLeaseMatches(
                     generation: captureGeneration,
@@ -1891,7 +1909,14 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
 
     @discardableResult
     private func applyCameraFrameRateOnQueue(_ requestedFPS: Int) -> Bool {
-        guard let input = currentVideoInput else { return false }
+        guard let input = currentVideoInput else {
+            // Silent false paths are how a whole morning was lost: the records
+            // said `running entry -> parked unavailable` in the same second and
+            // the diag log said nothing. Name the cause where a devicectl pull
+            // can read it.
+            PoplurDiagLog.append("[PoplurCamera] frameRate SKIPPED: no video input attached (requested=\(requestedFPS))")
+            return false
+        }
         let device = input.device
         let supportedRanges = device.activeFormat.videoSupportedFrameRateRanges
         // DESCEND from what was asked for. The preview's list used to be
@@ -1907,7 +1932,13 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
             return supportedRanges.contains(where: {
                 $0.minFrameRate <= fps && fps <= $0.maxFrameRate
             })
-        }) else { return false }
+        }) else {
+            PoplurDiagLog.append(
+                "[PoplurCamera] frameRate SKIPPED: no supported candidate for \(requestedFPS) in "
+                    + supportedRanges.map { "\(Int($0.minFrameRate))-\(Int($0.maxFrameRate))" }.joined(separator: ",")
+            )
+            return false
+        }
 
         // The thermal soak reads Documents/poplur-diag.log, and nothing in it
         // said what rate the preview actually got. `selectedFPS` is chosen from
