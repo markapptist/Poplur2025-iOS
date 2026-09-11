@@ -2,6 +2,7 @@ import * as admin from "firebase-admin";
 import { timingSafeEqual } from "node:crypto";
 import { FieldValue } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { RADIUS_HISTORY_COLLECTION } from "./postEngagementPolicy";
 import { defineSecret } from "firebase-functions/params";
 import {
   emptySyntheticBrowserRuntime,
@@ -53,6 +54,122 @@ const EVENT_KINDS = new Set(["posted", "like", "view", "comment", "radius-up", "
 const FEEDBACK_LIMIT = 1_200;
 const ACTIVITY_LIMIT = 100;
 const POST_LIMIT = 120;
+/** The tester table reads every account and the newest slice of the real
+ *  posts ledger. Beta-sized on purpose; both are one read. */
+const TESTER_TABLE_USER_LIMIT = 1000;
+const TESTER_TABLE_POST_LIMIT = 2000;
+const TESTER_RECENT_POSTS = 24;
+/** A heartbeat this fresh is "online". Same window the activity rows use. */
+const ONLINE_WINDOW_MS = 90_000;
+
+function finiteCoordinate(latitude: unknown, longitude: unknown): { latitude: number; longitude: number } | null {
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return { latitude: lat, longitude: lng };
+}
+
+export interface TesterTableInput {
+  now: number;
+  users: Array<{ uid: string; profile: FirebaseFirestore.DocumentData }>;
+  accounts: Array<{ uid: string; displayName: string | null; email: string | null; createdAtMs: number; lastSignInAtMs: number }>;
+  heartbeats: Array<{ uid: string } & FirebaseFirestore.DocumentData>;
+  ledger: Array<{ id: string } & FirebaseFirestore.DocumentData>;
+}
+
+export interface TesterPostSummary {
+  id: string;
+  createdAtMs: number;
+  radiusMeters: number;
+  mediaType: "photo" | "video";
+  mediaCount: number;
+  caption: string;
+  channelId: string;
+  coarse: { latitude: number; longitude: number } | null;
+}
+
+export interface TesterTableRow {
+  uid: string;
+  label: string;
+  username: string;
+  accountType: string;
+  signedUpAtMs: number;
+  lastSignInAtMs: number;
+  /** online = heartbeat inside ONLINE_WINDOW_MS; away = a heartbeat older than
+   *  that; unknown = never heartbeated, which for real testers means they have
+   *  not opted into activity sharing. */
+  presence: "online" | "away" | "unknown";
+  lastActivityAtMs: number;
+  screen: string;
+  platform: string;
+  postCount: number;
+  lastPostedAtMs: number;
+  posts: TesterPostSummary[];
+}
+
+/**
+ * Pure. One row per account, joined across three sources that each know one
+ * thing: Auth knows when they signed up, testActivity knows whether they are
+ * here right now, and the posts ledger knows what they have made. A tester who
+ * appears in none but Auth still gets a row - a signup with zero posts and no
+ * heartbeat is exactly the person the owner most wants to see.
+ */
+export function buildTesterTable(input: TesterTableInput): TesterTableRow[] {
+  const profiles = new Map(input.users.map(user => [user.uid, user.profile]));
+  const heartbeats = new Map(input.heartbeats.map(beat => [beat.uid, beat]));
+  const byOwner = new Map<string, TesterPostSummary[]>();
+  for (const post of input.ledger) {
+    const owner = typeof post.userID === "string" ? post.userID : "";
+    if (!owner) continue;
+    const list = byOwner.get(owner) ?? [];
+    list.push({
+      id: post.id,
+      createdAtMs: safeMetric(post.createdAtMillis, 0, Number.MAX_SAFE_INTEGER) || timestampMs(post.createdAt),
+      radiusMeters: safeMetric(post.radius, 0, 40_075_000),
+      mediaType: post.mediaType === "video" ? "video" : "photo",
+      mediaCount: safeMetric(post.mediaCount, 1, 10, 1),
+      caption: text(post.caption, 120),
+      channelId: text(post.channelId, 64),
+      coarse: finiteCoordinate(post.latitude, post.longitude),
+    });
+    byOwner.set(owner, list);
+  }
+  // Every uid any source has seen. Auth first, so the signup date leads.
+  const uids = new Set<string>([
+    ...input.accounts.map(account => account.uid),
+    ...input.users.map(user => user.uid),
+    ...byOwner.keys(),
+  ]);
+  const accounts = new Map(input.accounts.map(account => [account.uid, account]));
+  return [...uids].map((uid): TesterTableRow => {
+    const account = accounts.get(uid);
+    const profile = profiles.get(uid);
+    const beat = heartbeats.get(uid);
+    const lastActivityAtMs = beat ? timestampMs(beat.lastActivityAt) : 0;
+    const posts = (byOwner.get(uid) ?? []).sort((a, b) => b.createdAtMs - a.createdAtMs);
+    return {
+      uid,
+      label: labelFor(uid, profile, account?.displayName ?? null),
+      username: text(profile?.username, 40),
+      accountType: text(profile?.accountType, 16) || "user",
+      signedUpAtMs: account?.createdAtMs ?? 0,
+      lastSignInAtMs: account?.lastSignInAtMs ?? 0,
+      presence: !beat ? "unknown" : input.now - lastActivityAtMs <= ONLINE_WINDOW_MS ? "online" : "away",
+      lastActivityAtMs,
+      screen: text(beat?.screen, 40),
+      platform: beat?.platform === "native" ? "native" : beat ? "browser" : "",
+      postCount: posts.length,
+      lastPostedAtMs: posts[0]?.createdAtMs ?? 0,
+      posts: posts.slice(0, TESTER_RECENT_POSTS),
+    };
+  }).sort((a, b) => {
+    const rank = (row: TesterTableRow) => row.presence === "online" ? 0 : row.presence === "away" ? 1 : 2;
+    return rank(a) - rank(b)
+      || b.lastActivityAtMs - a.lastActivityAtMs
+      || b.lastPostedAtMs - a.lastPostedAtMs
+      || b.signedUpAtMs - a.signedUpAtMs;
+  });
+}
 const FEEDBACK_LIST_LIMIT = 80;
 
 function db(): admin.firestore.Firestore {
@@ -257,6 +374,7 @@ async function setRunnerActor(
 export const testActivityControl = onCall({ region: REGION, secrets: [BETA_DESK_ACCESS_TOKEN] }, async request => {
   const action = request.data?.action;
   const operatorAction = action === "dashboard"
+    || action === "postHistory"
     || action === "simulation"
     || action === "simulationStep"
     || action === "simulationPulse"
@@ -429,17 +547,86 @@ export const testActivityControl = onCall({ region: REGION, secrets: [BETA_DESK_
     return setRunnerActor(actorId, runnerUid, request.data.active, uid);
   }
 
+  if (action === "postHistory") {
+    requireAdmin(uid);
+    const postId = typeof request.data?.postId === "string" ? request.data.postId : "";
+    if (!/^post-[A-Za-z0-9_-]{16,96}$/.test(postId)) {
+      throw new HttpsError("invalid-argument", "That post id is not one this desk can open.");
+    }
+    const postRef = db().collection("posts").doc(postId);
+    const [postSnapshot, historySnapshot] = await Promise.all([
+      postRef.get(),
+      postRef.collection(RADIUS_HISTORY_COLLECTION).orderBy("atMillis", "asc").limit(500).get(),
+    ]);
+    if (!postSnapshot.exists) throw new HttpsError("not-found", "That post no longer exists.");
+    const post = postSnapshot.data() ?? {};
+    const ownerId = typeof post.userID === "string" ? post.userID : "";
+    // The exact drop point lives under the owner, never on the public post.
+    // This desk is owner-only, so it may read it; the public document keeps
+    // only the coarse cell, which is what everyone else gets.
+    const exact = ownerId
+      ? await db().collection("users").doc(ownerId).collection("postLocations").doc(postId).get().catch(() => null)
+      : null;
+    return {
+      postId,
+      ownerId,
+      createdAtMs: timestampMs(post.createdAt) || safeMetric(post.createdAtMillis, 0, Number.MAX_SAFE_INTEGER),
+      caption: text(post.caption, 280),
+      channelId: text(post.channelId, 64),
+      mediaType: post.mediaType === "video" ? "video" : "photo",
+      mediaCount: safeMetric(post.mediaCount, 1, 10, 1),
+      radiusMeters: safeMetric(post.radius, 0, 40_075_000),
+      seedRadiusMeters: safeMetric(post.seedRadiusMeters, 0, 40_075_000),
+      organicRadiusMeters: safeMetric(post.organicRadiusMeters, 0, 40_075_000),
+      locationVisibility: text(post.locationVisibility, 16),
+      coarse: finiteCoordinate(post.latitude, post.longitude),
+      exact: exact?.exists ? finiteCoordinate(exact.data()?.latitude, exact.data()?.longitude) : null,
+      history: historySnapshot.docs.map(doc => {
+        const entry = doc.data();
+        return {
+          id: doc.id,
+          atMs: safeMetric(entry.atMillis, 0, Number.MAX_SAFE_INTEGER),
+          cause: text(entry.cause, 24) || "unknown",
+          kind: text(entry.kind, 24) || null,
+          radiusMeters: safeMetric(entry.radiusMeters, 0, 40_075_000),
+          organicRadiusMeters: safeMetric(entry.organicRadiusMeters, 0, 40_075_000),
+          seedRadiusMeters: safeMetric(entry.seedRadiusMeters, 0, 40_075_000),
+          delta: safeMetric(entry.delta, -40_075_000, 40_075_000),
+          writer: text(entry.writer, 40),
+        };
+      }),
+    };
+  }
+
   if (action === "dashboard") {
     requireAdmin(uid);
     const now = Date.now();
-    const [activitySnapshot, postSnapshot, feedbackSnapshot, runtimeSnapshot, runnerConfigSnapshot, simulationConfigSnapshot] = await Promise.all([
+    const [activitySnapshot, postSnapshot, feedbackSnapshot, runtimeSnapshot, runnerConfigSnapshot, simulationConfigSnapshot, usersSnapshot, ledgerSnapshot, authPage] = await Promise.all([
       db().collection("testActivity").orderBy("lastActivityAt", "desc").limit(ACTIVITY_LIMIT).get(),
       db().collection("testBetaPosts").orderBy("updatedAt", "desc").limit(POST_LIMIT).get(),
       db().collection("testFeedback").orderBy("createdAt", "desc").limit(FEEDBACK_LIST_LIMIT).get(),
       db().collection("testControl").doc(SYNTHETIC_RUNNER_RUNTIME_DOC).get(),
       db().collection("testControl").doc(SYNTHETIC_RUNNER_CONFIG_DOC).get(),
       db().collection("testControl").doc("simulation").get(),
+      // The tester table below. Beta scale: every account and the newest slice
+      // of the real posts ledger fit in one read each.
+      db().collection("users").limit(TESTER_TABLE_USER_LIMIT).get(),
+      db().collection("posts").orderBy("createdAtMillis", "desc").limit(TESTER_TABLE_POST_LIMIT).get(),
+      admin.auth().listUsers(TESTER_TABLE_USER_LIMIT).catch(() => null),
     ]);
+    const testers = buildTesterTable({
+      now,
+      users: usersSnapshot.docs.map(doc => ({ uid: doc.id, profile: doc.data() })),
+      accounts: (authPage?.users ?? []).map(user => ({
+        uid: user.uid,
+        displayName: user.displayName ?? null,
+        email: user.email ?? null,
+        createdAtMs: Date.parse(user.metadata.creationTime ?? "") || 0,
+        lastSignInAtMs: Date.parse(user.metadata.lastSignInTime ?? "") || 0,
+      })),
+      heartbeats: activitySnapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() })),
+      ledger: ledgerSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })),
+    });
     const posts = postSnapshot.docs.map(doc => {
       const post = doc.data();
       const postedAtMs = timestampMs(post.postedAt);
@@ -515,6 +702,7 @@ export const testActivityControl = onCall({ region: REGION, secrets: [BETA_DESK_
       });
     return {
       generatedAtMs: now,
+      testers,
       rows: activitySnapshot.docs.map(doc => {
         const row = doc.data();
         const lastActivityAtMs = row.lastActivityAt?.toMillis?.() ?? 0;
