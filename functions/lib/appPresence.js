@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.appPresence = exports.PRESENCE_COLLECTION = exports.PRESENCE_LEASE_MS = void 0;
+exports.appPresence = exports.COUNT_SYNTHETIC_TESTERS = exports.PRESENCE_COLLECTION = exports.PRESENCE_LEASE_MS = void 0;
 exports.presenceInput = presenceInput;
 exports.countPresentPeople = countPresentPeople;
 exports.updateAppPresence = updateAppPresence;
@@ -52,9 +52,15 @@ function presenceInput(data) {
     }
     return { session: data.session, sequence: Number(data.sequence), active: data.active };
 }
-function countPresentPeople(rows, now) {
+/** BETA PHASE: there are no human testers yet, so the synthetic cohort is the
+ *  audience the algorithm is being built against, and ONLINE NOW counts them
+ *  (owner decision, 11 Sep 2026). Flip to `false` when humans arrive in the
+ *  next testing phase and the number goes back to people only. The Test Center
+ *  desk (testActivity.ts) has always counted actors apart and is unaffected. */
+exports.COUNT_SYNTHETIC_TESTERS = true;
+function countPresentPeople(rows, now, countSynthetic = exports.COUNT_SYNTHETIC_TESTERS) {
     return new Set(rows.filter(row => typeof row.uid === "string" && row.uid.length > 0
-        && row.synthetic !== true && typeof row.activeUntilMs === "number"
+        && (countSynthetic || row.synthetic !== true) && typeof row.activeUntilMs === "number"
         && row.activeUntilMs > now && row.activeUntilMs <= now + exports.PRESENCE_LEASE_MS)
         .map(row => row.uid)).size;
 }
@@ -90,7 +96,15 @@ async function updateAppPresence(db, uid, synthetic, data, now = Date.now()) {
 exports.appPresence = (0, https_1.onCall)({ region: "us-central1", timeoutSeconds: 15 }, async (request) => {
     if (!request.auth)
         throw new https_1.HttpsError("unauthenticated", "Sign in to Poplur.");
-    if (!admin.apps.length)
+    // Look for the DEFAULT app by name, never by `apps.length`. Verifying this
+    // request's bearer token made firebase-functions create its own private app
+    // ("__FIREBASE_FUNCTIONS_SDK__") when no default existed — so by the time
+    // this line ran, `apps.length` was already 1, the guard skipped
+    // initializeApp(), and admin.firestore() threw "default app does not
+    // exist" on every authenticated call. index.ts normally initialises the
+    // default first, but this function has shipped as an isolated stub without
+    // it, which is exactly the case the count-based guard cannot survive.
+    if (!admin.apps.some(app => app?.name === "[DEFAULT]"))
         admin.initializeApp();
     return updateAppPresence(admin.firestore(), request.auth.uid, request.auth.token.syntheticBeta === true, request.data ?? {});
 });

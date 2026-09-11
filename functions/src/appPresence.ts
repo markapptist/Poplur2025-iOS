@@ -18,12 +18,20 @@ export function presenceInput(data: Record<string, unknown>): {
   return { session: data.session, sequence: Number(data.sequence), active: data.active };
 }
 
+/** BETA PHASE: there are no human testers yet, so the synthetic cohort is the
+ *  audience the algorithm is being built against, and ONLINE NOW counts them
+ *  (owner decision, 11 Sep 2026). Flip to `false` when humans arrive in the
+ *  next testing phase and the number goes back to people only. The Test Center
+ *  desk (testActivity.ts) has always counted actors apart and is unaffected. */
+export const COUNT_SYNTHETIC_TESTERS = true;
+
 export function countPresentPeople(
   rows: readonly { uid?: unknown; synthetic?: unknown; activeUntilMs?: unknown }[],
   now: number,
+  countSynthetic = COUNT_SYNTHETIC_TESTERS,
 ): number {
   return new Set(rows.filter(row => typeof row.uid === "string" && row.uid.length > 0
-    && row.synthetic !== true && typeof row.activeUntilMs === "number"
+    && (countSynthetic || row.synthetic !== true) && typeof row.activeUntilMs === "number"
     && row.activeUntilMs > now && row.activeUntilMs <= now + PRESENCE_LEASE_MS)
     .map(row => row.uid)).size;
 }
@@ -62,7 +70,15 @@ export async function updateAppPresence(
 
 export const appPresence = onCall({ region: "us-central1", timeoutSeconds: 15 }, async request => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in to Poplur.");
-  if (!admin.apps.length) admin.initializeApp();
+  // Look for the DEFAULT app by name, never by `apps.length`. Verifying this
+  // request's bearer token made firebase-functions create its own private app
+  // ("__FIREBASE_FUNCTIONS_SDK__") when no default existed — so by the time
+  // this line ran, `apps.length` was already 1, the guard skipped
+  // initializeApp(), and admin.firestore() threw "default app does not
+  // exist" on every authenticated call. index.ts normally initialises the
+  // default first, but this function has shipped as an isolated stub without
+  // it, which is exactly the case the count-based guard cannot survive.
+  if (!admin.apps.some(app => app?.name === "[DEFAULT]")) admin.initializeApp();
   return updateAppPresence(admin.firestore(), request.auth.uid,
     request.auth.token.syntheticBeta === true, request.data ?? {});
 });
