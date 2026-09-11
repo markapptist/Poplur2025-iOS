@@ -111,6 +111,9 @@ export interface TesterTableRow {
   postCount: number;
   lastPostedAtMs: number;
   posts: TesterPostSummary[];
+  /** A cohort actor, sim-daily account or other labelled simulation account.
+   *  The desk counts these apart so "new testers" means people. */
+  synthetic: boolean;
 }
 
 /**
@@ -184,6 +187,7 @@ export function buildTesterTable(input: TesterTableInput): TesterTableRow[] {
       postCount: posts.length,
       lastPostedAtMs: posts[0]?.createdAtMs ?? 0,
       posts: posts.slice(0, TESTER_RECENT_POSTS),
+      synthetic: isSyntheticAccount(uid, profile, account?.email ?? null),
     };
   }).sort((a, b) => {
     const rank = (row: TesterTableRow) => row.presence === "online" ? 0 : row.presence === "away" ? 1 : 2;
@@ -193,6 +197,115 @@ export function buildTesterTable(input: TesterTableInput): TesterTableRow[] {
       || b.signedUpAtMs - a.signedUpAtMs;
   });
 }
+
+/** Every way a simulation account announces itself: the cohort actor ids
+ *  (syntheticBetaCohort), the sim-daily flags on users/{uid}
+ *  (syntheticDailySimulation writes syntheticBeta + syntheticSource), the
+ *  labelled accountType, and the @poplur.test mailbox every provisioner uses. */
+export function isSyntheticAccount(uid: string, profile: FirebaseFirestore.DocumentData | undefined, email: string | null): boolean {
+  if (syntheticProfile(uid)) return true;
+  // Lab posters (synthetic-conquer-*) and sim-daily accounts carry it in the
+  // uid itself; Auth uids are random, so a prefix cannot collide with a person.
+  if (/^(synthetic-|sim-)/.test(uid)) return true;
+  if (profile?.syntheticBeta === true || profile?.syntheticCohort === true) return true;
+  if (typeof profile?.syntheticSource === "string" && profile.syntheticSource) return true;
+  if (typeof profile?.accountType === "string" && profile.accountType.toLowerCase().startsWith("synthetic")) return true;
+  return typeof email === "string" && email.toLowerCase().endsWith("@poplur.test");
+}
+
+/** A post is synthetic when its writer stamped it so, or when its owner is. */
+export function isSyntheticPost(post: FirebaseFirestore.DocumentData, ownerSynthetic: boolean): boolean {
+  return ownerSynthetic
+    || post.syntheticBeta === true
+    || post.syntheticCohort === true
+    || (typeof post.syntheticActorId === "string" && post.syntheticActorId !== "");
+}
+
+const DAILY_SERIES_DAYS = 14;
+/** The owner reads the desk from Toronto; days roll at that midnight. */
+const DAILY_SERIES_TIME_ZONE = "America/Toronto";
+
+export interface DailyCount {
+  /** Calendar day in the series time zone, YYYY-MM-DD. */
+  day: string;
+  signups: number;
+  syntheticSignups: number;
+  posts: number;
+  syntheticPosts: number;
+}
+
+export interface DailySeries {
+  timeZone: string;
+  /** Oldest first, ending today; every day present, zero-filled. */
+  days: DailyCount[];
+  /** False when the posts ledger slice was capped before the window's oldest
+   *  day, so early columns may under-count pops. Signups come from Auth and
+   *  are always complete. */
+  postsComplete: boolean;
+}
+
+export interface DailySeriesInput {
+  now: number;
+  accounts: TesterTableInput["accounts"];
+  users: TesterTableInput["users"];
+  ledger: TesterTableInput["ledger"];
+  days?: number;
+  timeZone?: string;
+  ledgerLimit?: number;
+}
+
+/**
+ * Pure. How many people joined and how many pops were dropped on each of the
+ * last N calendar days, real and synthetic counted apart. Built from the same
+ * Auth page, users slice and posts slice the tester table already holds, so
+ * it costs the dashboard no extra reads.
+ */
+export function buildDailySeries(input: DailySeriesInput): DailySeries {
+  const timeZone = input.timeZone || DAILY_SERIES_TIME_ZONE;
+  const count = Math.max(1, Math.min(input.days ?? DAILY_SERIES_DAYS, 90));
+  const format = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" });
+  const dayKey = (ms: number) => format.format(new Date(ms));
+  // Walk back in half-day steps so a DST change can neither skip nor double a day.
+  const keys: string[] = [];
+  for (let step = 0; keys.length < count && step < count * 4; step++) {
+    const key = dayKey(input.now - step * 43_200_000);
+    if (!keys.includes(key)) keys.push(key);
+  }
+  keys.reverse();
+  const byDay = new Map(keys.map(key => [key, { day: key, signups: 0, syntheticSignups: 0, posts: 0, syntheticPosts: 0 }]));
+  const profiles = new Map(input.users.map(user => [user.uid, user.profile]));
+  const syntheticOwners = new Set<string>();
+  const seen = new Set<string>();
+  const consider = (uid: string, email: string | null) => {
+    if (isSyntheticAccount(uid, profiles.get(uid), email)) syntheticOwners.add(uid);
+  };
+  for (const account of input.accounts) { seen.add(account.uid); consider(account.uid, account.email); }
+  for (const user of input.users) if (!seen.has(user.uid)) consider(user.uid, null);
+  for (const account of input.accounts) {
+    if (!account.createdAtMs) continue;
+    const bucket = byDay.get(dayKey(account.createdAtMs));
+    if (!bucket) continue;
+    bucket.signups += 1;
+    if (syntheticOwners.has(account.uid)) bucket.syntheticSignups += 1;
+  }
+  let oldestPostMs = Number.POSITIVE_INFINITY;
+  for (const post of input.ledger) {
+    const createdAtMs = safeMetric(post.createdAtMillis, 0, Number.MAX_SAFE_INTEGER) || timestampMs(post.createdAt);
+    if (!createdAtMs) continue;
+    oldestPostMs = Math.min(oldestPostMs, createdAtMs);
+    const bucket = byDay.get(dayKey(createdAtMs));
+    if (!bucket) continue;
+    const owner = typeof post.userID === "string" ? post.userID : "";
+    const ownerSynthetic = owner ? (syntheticOwners.has(owner) || isSyntheticAccount(owner, profiles.get(owner), null)) : false;
+    bucket.posts += 1;
+    if (isSyntheticPost(post, ownerSynthetic)) bucket.syntheticPosts += 1;
+  }
+  const limit = input.ledgerLimit ?? TESTER_TABLE_POST_LIMIT;
+  const postsComplete = input.ledger.length < limit
+    || (Number.isFinite(oldestPostMs) && dayKey(oldestPostMs) < keys[0]);
+  return { timeZone, days: keys.map(key => byDay.get(key)!), postsComplete };
+}
+
 const FEEDBACK_LIST_LIMIT = 80;
 
 function db(): admin.firestore.Firestore {
@@ -660,6 +773,18 @@ export const testActivityControl = onCall({ region: REGION, secrets: [BETA_DESK_
         activeUntilMs: doc.data().activeUntil?.toMillis?.() ?? 0,
       })),
     });
+    const daily = buildDailySeries({
+      now,
+      accounts: (authPage?.users ?? []).map(user => ({
+        uid: user.uid,
+        displayName: user.displayName ?? null,
+        email: user.email ?? null,
+        createdAtMs: Date.parse(user.metadata.creationTime ?? "") || 0,
+        lastSignInAtMs: Date.parse(user.metadata.lastSignInTime ?? "") || 0,
+      })),
+      users: usersSnapshot.docs.map(doc => ({ uid: doc.id, profile: doc.data() })),
+      ledger: ledgerSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })),
+    });
     const posts = postSnapshot.docs.map(doc => {
       const post = doc.data();
       const postedAtMs = timestampMs(post.postedAt);
@@ -736,6 +861,7 @@ export const testActivityControl = onCall({ region: REGION, secrets: [BETA_DESK_
     return {
       generatedAtMs: now,
       testers,
+      daily,
       rows: activitySnapshot.docs.map(doc => {
         const row = doc.data();
         const lastActivityAtMs = row.lastActivityAt?.toMillis?.() ?? 0;
