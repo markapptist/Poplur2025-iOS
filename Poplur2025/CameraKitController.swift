@@ -595,7 +595,18 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
 
         registration.setVisible(true)
         guard registration.isGrantedRendering else {
-            parkCamera(reason: .unavailable, canResume: true, preserveLastFrame: true)
+            // Not a failure: Poplur grants exactly one heavy renderer, chosen by
+            // priority, and the post-login WebView (140) outranks this camera
+            // (120) until it yields its lease via setLightweightOverlayMode.
+            // That yield arrives a beat after this entry, so the sensor was
+            // being parked as .unavailable — "Camera could not start" behind a
+            // tap gate on EVERY open of the camera tab — and the grant that
+            // followed restarted nothing. Report it as a pending entry: the web
+            // shows no card for that and asks to resume, and
+            // applyCapturePerformance reopens the window the moment the grant
+            // lands. .unavailable is reserved for a capture graph that really
+            // failed.
+            parkCamera(reason: .entry, canResume: true, preserveLastFrame: true)
             return
         }
 
@@ -1771,6 +1782,20 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
            requiresEmergencyThermalPark,
            !isColdBudgetParked {
             parkCamera(reason: .thermal, canResume: false, preserveLastFrame: true)
+            return
+        }
+        // The heavy-renderer grant just arrived for a preview that was parked
+        // only because it was outranked at entry (see beginPreviewWindow).
+        // parkCamera cleared performanceWantsCapture, so without this the grant
+        // would restart nothing and the viewfinder would stay black. Reopen it
+        // now — the surface is visible, the user asked for the camera, and
+        // nothing thermal is in the way. Thermal parks are excluded by reason.
+        if granted,
+           isColdBudgetParked,
+           latestColdBudgetUpdate.reason == .entry,
+           performanceRegistration?.isVisible == true,
+           !requiresEmergencyThermalPark {
+            beginPreviewWindow(reason: .entry, explicitUserResume: false)
             return
         }
 
