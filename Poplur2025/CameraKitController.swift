@@ -406,6 +406,12 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
         return generation
     }
 
+    private func currentCaptureLeaseGeneration() -> UInt64 {
+        captureLeaseStateLock.lock()
+        let generation = captureLeaseGeneration
+        captureLeaseStateLock.unlock()
+        return generation
+    }
     private func captureLeaseMatches(generation: UInt64, desired: Bool) -> Bool {
         captureLeaseStateLock.lock()
         let matches = captureLeaseGeneration == generation && captureDesiredOn == desired
@@ -1989,9 +1995,12 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
             device.activeVideoMaxFrameDuration = duration
             return true
         } catch {
-            #if DEBUG
-            print("[PoplurPerformance] Camera FPS update failed: \(error.localizedDescription)")
-            #endif
+            // The last silent false path. This is the one that fired at
+            // 10:39:10 on 11 Sep: selection logged fine, then the device lock
+            // was held by another configurer (focus/zoom from a web message)
+            // and lockForConfiguration threw. Name it where a devicectl pull
+            // can read it; the #if DEBUG print never reaches syslog.
+            PoplurDiagLog.append("[PoplurCamera] frameRate SKIPPED: lockForConfiguration threw — \(error.localizedDescription)")
             return false
         }
     }
@@ -2035,9 +2044,16 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
             captureSession.commitConfiguration()
 
             let fpsLimit = currentCaptureFrameRateLimitOnQueue()
+            // A failed rate apply is a power optimisation missed, not a broken
+            // camera — the same rule as the start path. Parking here as
+            // .unavailable drew "Camera could not start" on a viewfinder that
+            // was already streaming. Log, retry once under the same lease.
             if !applyCameraFrameRateOnQueue(fpsLimit) {
-                DispatchQueue.main.async { [weak self] in
-                    self?.parkCamera(reason: .unavailable, canResume: true, preserveLastFrame: true)
+                PoplurDiagLog.append("[PoplurCamera] frameRate deferred (reconfigure path): retry in 350ms")
+                let retryGeneration = currentCaptureLeaseGeneration()
+                sessionQueue.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                    guard let self, self.captureLeaseMatches(generation: retryGeneration, desired: true) else { return }
+                    _ = self.applyCameraFrameRateOnQueue(self.currentCaptureFrameRateLimitOnQueue())
                 }
             }
 
@@ -2432,9 +2448,16 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
         frameProcessingLock.unlock()
         setVideoFrameDeliveryActiveOnQueue(shouldDeliver)
         let fpsLimit = currentCaptureFrameRateLimitOnQueue()
+        // A failed rate apply is a power optimisation missed, not a broken
+        // camera — the same rule as the start path. Parking here as
+        // .unavailable drew "Camera could not start" on a viewfinder that
+        // was already streaming. Log, retry once under the same lease.
         if !applyCameraFrameRateOnQueue(fpsLimit) {
-            DispatchQueue.main.async { [weak self] in
-                self?.parkCamera(reason: .unavailable, canResume: true, preserveLastFrame: true)
+            PoplurDiagLog.append("[PoplurCamera] frameRate deferred (reconfigure path): retry in 350ms")
+            let retryGeneration = currentCaptureLeaseGeneration()
+            sessionQueue.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                guard let self, self.captureLeaseMatches(generation: retryGeneration, desired: true) else { return }
+                _ = self.applyCameraFrameRateOnQueue(self.currentCaptureFrameRateLimitOnQueue())
             }
         }
     }
@@ -2498,9 +2521,16 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
             self.frameProcessingLock.unlock()
             self.setVideoFrameDeliveryActiveOnQueue(shouldDeliver)
             let fpsLimit = self.currentCaptureFrameRateLimitOnQueue()
+            // A failed rate apply is a power optimisation missed, not a broken
+            // camera — the same rule as the start path. Parking here as
+            // .unavailable drew "Camera could not start" on a viewfinder that
+            // was already streaming. Log, retry once under the same lease.
             if !self.applyCameraFrameRateOnQueue(fpsLimit) {
-                DispatchQueue.main.async { [weak self] in
-                    self?.parkCamera(reason: .unavailable, canResume: true, preserveLastFrame: true)
+                PoplurDiagLog.append("[PoplurCamera] frameRate deferred (reconfigure path): retry in 350ms")
+                let retryGeneration = self.currentCaptureLeaseGeneration()
+                self.sessionQueue.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                    guard let self, self.captureLeaseMatches(generation: retryGeneration, desired: true) else { return }
+                    _ = self.applyCameraFrameRateOnQueue(self.currentCaptureFrameRateLimitOnQueue())
                 }
             }
             
