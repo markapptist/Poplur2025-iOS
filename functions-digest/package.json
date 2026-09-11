@@ -1,0 +1,21 @@
+{
+  "name": "poplur-functions-digest",
+  "private": true,
+  "description": "Poplur scheduled engagement digests (nearby pops). Deliberately tiny: no googleapis, genkit or AI SDKs, so it cold-starts in about a second and deploys without the main codebase's secret bindings.",
+  "engines": {
+    "node": "22"
+  },
+  "main": "lib/index.js",
+  "scripts": {
+    "build": "tsc",
+    "test": "npm run build && node scripts/testNearbyPopsPolicy.js",
+    "test:nearby-pops": "npm run build && node scripts/testNearbyPopsPolicy.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.10.0",
+    "firebase-functions": "^6.6.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  }
+}

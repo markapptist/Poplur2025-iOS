@@ -1,0 +1,5 @@
+# For `gcloud run deploy --source`: ship the compiled lib/ (which .gitignore
+# hides from git) but never node_modules or logs. The build runs `npm ci`.
+node_modules/
+*.log
+.git/
