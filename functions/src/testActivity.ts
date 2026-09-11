@@ -3,6 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { FieldValue } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { RADIUS_HISTORY_COLLECTION } from "./postEngagementPolicy";
+import { PRESENCE_COLLECTION, PRESENCE_LEASE_MS } from "./appPresence";
 import { defineSecret } from "firebase-functions/params";
 import {
   emptySyntheticBrowserRuntime,
@@ -75,6 +76,9 @@ export interface TesterTableInput {
   accounts: Array<{ uid: string; displayName: string | null; email: string | null; createdAtMs: number; lastSignInAtMs: number }>;
   heartbeats: Array<{ uid: string } & FirebaseFirestore.DocumentData>;
   ledger: Array<{ id: string } & FirebaseFirestore.DocumentData>;
+  /** Live foreground leases from appPresenceSessions, already filtered to
+   *  activeUntil > now by the query. Optional so older callers keep working. */
+  leases?: Array<{ uid: string; synthetic: boolean; activeUntilMs: number }>;
 }
 
 export interface TesterPostSummary {
@@ -95,10 +99,12 @@ export interface TesterTableRow {
   accountType: string;
   signedUpAtMs: number;
   lastSignInAtMs: number;
-  /** online = heartbeat inside ONLINE_WINDOW_MS; away = a heartbeat older than
-   *  that; unknown = never heartbeated, which for real testers means they have
-   *  not opted into activity sharing. */
+  /** online = a live foreground lease (every signed-in account writes one), or
+   *  failing that a heartbeat inside ONLINE_WINDOW_MS; away = we have seen them
+   *  but not now; unknown = never seen by either signal. */
   presence: "online" | "away" | "unknown";
+  /** Which signal decided `presence`, so the desk can say "no signal" honestly. */
+  presenceSource: "lease" | "heartbeat" | "none";
   lastActivityAtMs: number;
   screen: string;
   platform: string;
@@ -117,6 +123,15 @@ export interface TesterTableRow {
 export function buildTesterTable(input: TesterTableInput): TesterTableRow[] {
   const profiles = new Map(input.users.map(user => [user.uid, user.profile]));
   const heartbeats = new Map(input.heartbeats.map(beat => [beat.uid, beat]));
+  // One uid can hold several session leases; the freshest wins. Synthetic
+  // actors are counted elsewhere and must not read as human presence.
+  const leases = new Map<string, number>();
+  for (const lease of input.leases ?? []) {
+    if (!lease.uid || lease.synthetic) continue;
+    if (lease.activeUntilMs > input.now && lease.activeUntilMs <= input.now + PRESENCE_LEASE_MS) {
+      leases.set(lease.uid, Math.max(leases.get(lease.uid) ?? 0, lease.activeUntilMs));
+    }
+  }
   const byOwner = new Map<string, TesterPostSummary[]>();
   for (const post of input.ledger) {
     const owner = typeof post.userID === "string" ? post.userID : "";
@@ -145,7 +160,14 @@ export function buildTesterTable(input: TesterTableInput): TesterTableRow[] {
     const account = accounts.get(uid);
     const profile = profiles.get(uid);
     const beat = heartbeats.get(uid);
-    const lastActivityAtMs = beat ? timestampMs(beat.lastActivityAt) : 0;
+    const heartbeatAtMs = beat ? timestampMs(beat.lastActivityAt) : 0;
+    const leaseUntilMs = leases.get(uid) ?? 0;
+    const heartbeatLive = input.now - heartbeatAtMs <= ONLINE_WINDOW_MS && heartbeatAtMs > 0;
+    const presence: TesterTableRow["presence"] = leaseUntilMs || heartbeatLive ? "online"
+      : beat || account?.lastSignInAtMs ? "away" : "unknown";
+    const presenceSource: TesterTableRow["presenceSource"] = leaseUntilMs ? "lease" : beat ? "heartbeat" : "none";
+    // The freshest thing we know about them, whichever signal it came from.
+    const lastActivityAtMs = Math.max(heartbeatAtMs, leaseUntilMs ? input.now : 0, account?.lastSignInAtMs ?? 0);
     const posts = (byOwner.get(uid) ?? []).sort((a, b) => b.createdAtMs - a.createdAtMs);
     return {
       uid,
@@ -154,7 +176,8 @@ export function buildTesterTable(input: TesterTableInput): TesterTableRow[] {
       accountType: text(profile?.accountType, 16) || "user",
       signedUpAtMs: account?.createdAtMs ?? 0,
       lastSignInAtMs: account?.lastSignInAtMs ?? 0,
-      presence: !beat ? "unknown" : input.now - lastActivityAtMs <= ONLINE_WINDOW_MS ? "online" : "away",
+      presence,
+      presenceSource,
       lastActivityAtMs,
       screen: text(beat?.screen, 40),
       platform: beat?.platform === "native" ? "native" : beat ? "browser" : "",
@@ -601,7 +624,7 @@ export const testActivityControl = onCall({ region: REGION, secrets: [BETA_DESK_
   if (action === "dashboard") {
     requireAdmin(uid);
     const now = Date.now();
-    const [activitySnapshot, postSnapshot, feedbackSnapshot, runtimeSnapshot, runnerConfigSnapshot, simulationConfigSnapshot, usersSnapshot, ledgerSnapshot, authPage] = await Promise.all([
+    const [activitySnapshot, postSnapshot, feedbackSnapshot, runtimeSnapshot, runnerConfigSnapshot, simulationConfigSnapshot, usersSnapshot, ledgerSnapshot, authPage, leaseSnapshot] = await Promise.all([
       db().collection("testActivity").orderBy("lastActivityAt", "desc").limit(ACTIVITY_LIMIT).get(),
       db().collection("testBetaPosts").orderBy("updatedAt", "desc").limit(POST_LIMIT).get(),
       db().collection("testFeedback").orderBy("createdAt", "desc").limit(FEEDBACK_LIST_LIMIT).get(),
@@ -613,6 +636,11 @@ export const testActivityControl = onCall({ region: REGION, secrets: [BETA_DESK_
       db().collection("users").limit(TESTER_TABLE_USER_LIMIT).get(),
       db().collection("posts").orderBy("createdAtMillis", "desc").limit(TESTER_TABLE_POST_LIMIT).get(),
       admin.auth().listUsers(TESTER_TABLE_USER_LIMIT).catch(() => null),
+      // Foreground leases are the online source: every account writes one,
+      // opted into activity sharing or not. Heartbeats only say which screen.
+      db().collection(PRESENCE_COLLECTION)
+        .where("activeUntil", ">", admin.firestore.Timestamp.fromMillis(now))
+        .select("uid", "synthetic", "activeUntil").get(),
     ]);
     const testers = buildTesterTable({
       now,
@@ -626,6 +654,11 @@ export const testActivityControl = onCall({ region: REGION, secrets: [BETA_DESK_
       })),
       heartbeats: activitySnapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() })),
       ledger: ledgerSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })),
+      leases: leaseSnapshot.docs.map(doc => ({
+        uid: typeof doc.data().uid === "string" ? doc.data().uid : "",
+        synthetic: doc.data().synthetic === true,
+        activeUntilMs: doc.data().activeUntil?.toMillis?.() ?? 0,
+      })),
     });
     const posts = postSnapshot.docs.map(doc => {
       const post = doc.data();

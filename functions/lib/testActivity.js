@@ -41,6 +41,7 @@ const node_crypto_1 = require("node:crypto");
 const firestore_1 = require("firebase-admin/firestore");
 const https_1 = require("firebase-functions/v2/https");
 const postEngagementPolicy_1 = require("./postEngagementPolicy");
+const appPresence_1 = require("./appPresence");
 const params_1 = require("firebase-functions/params");
 const syntheticBetaCohort_1 = require("./syntheticBetaCohort");
 const syntheticBrowserRunner_1 = require("./syntheticBrowserRunner");
@@ -104,6 +105,16 @@ function finiteCoordinate(latitude, longitude) {
 function buildTesterTable(input) {
     const profiles = new Map(input.users.map(user => [user.uid, user.profile]));
     const heartbeats = new Map(input.heartbeats.map(beat => [beat.uid, beat]));
+    // One uid can hold several session leases; the freshest wins. Synthetic
+    // actors are counted elsewhere and must not read as human presence.
+    const leases = new Map();
+    for (const lease of input.leases ?? []) {
+        if (!lease.uid || lease.synthetic)
+            continue;
+        if (lease.activeUntilMs > input.now && lease.activeUntilMs <= input.now + appPresence_1.PRESENCE_LEASE_MS) {
+            leases.set(lease.uid, Math.max(leases.get(lease.uid) ?? 0, lease.activeUntilMs));
+        }
+    }
     const byOwner = new Map();
     for (const post of input.ledger) {
         const owner = typeof post.userID === "string" ? post.userID : "";
@@ -133,7 +144,14 @@ function buildTesterTable(input) {
         const account = accounts.get(uid);
         const profile = profiles.get(uid);
         const beat = heartbeats.get(uid);
-        const lastActivityAtMs = beat ? timestampMs(beat.lastActivityAt) : 0;
+        const heartbeatAtMs = beat ? timestampMs(beat.lastActivityAt) : 0;
+        const leaseUntilMs = leases.get(uid) ?? 0;
+        const heartbeatLive = input.now - heartbeatAtMs <= ONLINE_WINDOW_MS && heartbeatAtMs > 0;
+        const presence = leaseUntilMs || heartbeatLive ? "online"
+            : beat || account?.lastSignInAtMs ? "away" : "unknown";
+        const presenceSource = leaseUntilMs ? "lease" : beat ? "heartbeat" : "none";
+        // The freshest thing we know about them, whichever signal it came from.
+        const lastActivityAtMs = Math.max(heartbeatAtMs, leaseUntilMs ? input.now : 0, account?.lastSignInAtMs ?? 0);
         const posts = (byOwner.get(uid) ?? []).sort((a, b) => b.createdAtMs - a.createdAtMs);
         return {
             uid,
@@ -142,7 +160,8 @@ function buildTesterTable(input) {
             accountType: text(profile?.accountType, 16) || "user",
             signedUpAtMs: account?.createdAtMs ?? 0,
             lastSignInAtMs: account?.lastSignInAtMs ?? 0,
-            presence: !beat ? "unknown" : input.now - lastActivityAtMs <= ONLINE_WINDOW_MS ? "online" : "away",
+            presence,
+            presenceSource,
             lastActivityAtMs,
             screen: text(beat?.screen, 40),
             platform: beat?.platform === "native" ? "native" : beat ? "browser" : "",
@@ -551,7 +570,7 @@ exports.testActivityControl = (0, https_1.onCall)({ region: REGION, secrets: [BE
     if (action === "dashboard") {
         requireAdmin(uid);
         const now = Date.now();
-        const [activitySnapshot, postSnapshot, feedbackSnapshot, runtimeSnapshot, runnerConfigSnapshot, simulationConfigSnapshot, usersSnapshot, ledgerSnapshot, authPage] = await Promise.all([
+        const [activitySnapshot, postSnapshot, feedbackSnapshot, runtimeSnapshot, runnerConfigSnapshot, simulationConfigSnapshot, usersSnapshot, ledgerSnapshot, authPage, leaseSnapshot] = await Promise.all([
             db().collection("testActivity").orderBy("lastActivityAt", "desc").limit(ACTIVITY_LIMIT).get(),
             db().collection("testBetaPosts").orderBy("updatedAt", "desc").limit(POST_LIMIT).get(),
             db().collection("testFeedback").orderBy("createdAt", "desc").limit(FEEDBACK_LIST_LIMIT).get(),
@@ -563,6 +582,11 @@ exports.testActivityControl = (0, https_1.onCall)({ region: REGION, secrets: [BE
             db().collection("users").limit(TESTER_TABLE_USER_LIMIT).get(),
             db().collection("posts").orderBy("createdAtMillis", "desc").limit(TESTER_TABLE_POST_LIMIT).get(),
             admin.auth().listUsers(TESTER_TABLE_USER_LIMIT).catch(() => null),
+            // Foreground leases are the online source: every account writes one,
+            // opted into activity sharing or not. Heartbeats only say which screen.
+            db().collection(appPresence_1.PRESENCE_COLLECTION)
+                .where("activeUntil", ">", admin.firestore.Timestamp.fromMillis(now))
+                .select("uid", "synthetic", "activeUntil").get(),
         ]);
         const testers = buildTesterTable({
             now,
@@ -576,6 +600,11 @@ exports.testActivityControl = (0, https_1.onCall)({ region: REGION, secrets: [BE
             })),
             heartbeats: activitySnapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() })),
             ledger: ledgerSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })),
+            leases: leaseSnapshot.docs.map(doc => ({
+                uid: typeof doc.data().uid === "string" ? doc.data().uid : "",
+                synthetic: doc.data().synthetic === true,
+                activeUntilMs: doc.data().activeUntil?.toMillis?.() ?? 0,
+            })),
         });
         const posts = postSnapshot.docs.map(doc => {
             const post = doc.data();

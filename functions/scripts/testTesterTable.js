@@ -24,6 +24,12 @@ const rows = buildTesterTable({
     { uid: "u-online", lastActivityAt: ts(NOW - 30_000), screen: "map", platform: "native" },
     { uid: "u-away", lastActivityAt: ts(NOW - 600_000), screen: "feed", platform: "browser" },
   ],
+  leases: [
+    // u-away has NO fresh heartbeat but holds a live foreground lease: online.
+    { uid: "u-away", synthetic: false, activeUntilMs: NOW + 60_000 },
+    // A synthetic actor's lease never reads as a human being online.
+    { uid: "u-signup-only", synthetic: true, activeUntilMs: NOW + 60_000 },
+  ],
   ledger: [
     { id: "post-aaaaaaaaaaaaaaaaaaaa1", userID: "u-online", createdAtMillis: NOW - 5000, radius: 5000, mediaType: "photo", latitude: 43.6, longitude: -79.4 },
     { id: "post-aaaaaaaaaaaaaaaaaaaa2", userID: "u-online", createdAtMillis: NOW - 9000, radius: 7000, mediaType: "video", mediaCount: 1 },
@@ -33,12 +39,19 @@ const rows = buildTesterTable({
 });
 
 // One row per account, even the one that has never done anything.
-assert.deepEqual(rows.map(r => r.uid), ["u-online", "u-away", "u-signup-only"]);
+assert.deepEqual(rows.map(r => r.uid).sort(), ["u-away", "u-online", "u-signup-only"]);
 
-const [online, away, signupOnly] = rows;
+// u-online is online by heartbeat alone; u-away is online by LEASE despite a
+// ten-minute-old heartbeat; the signup-only account's only lease is synthetic.
+const online = rows.find(r => r.uid === "u-online");
+const away = rows.find(r => r.uid === "u-away");
+const signupOnly = rows.find(r => r.uid === "u-signup-only");
 assert.equal(online.presence, "online");
-assert.equal(away.presence, "away");
+assert.equal(online.presenceSource, "heartbeat");
+assert.equal(away.presence, "online");
+assert.equal(away.presenceSource, "lease");
 assert.equal(signupOnly.presence, "unknown");
+assert.equal(signupOnly.presenceSource, "none");
 
 // Post counts and the most recent post lead each row.
 assert.equal(online.postCount, 2);
@@ -62,7 +75,7 @@ assert.equal(signupOnly.username, "");
 // The orphan ledger row never becomes a tester.
 assert.ok(!rows.some(r => r.uid === ""));
 
-// Ordering: online, then away, then unknown.
-assert.deepEqual(rows.map(r => r.presence), ["online", "away", "unknown"]);
+// Ordering: online first, unknown last.
+assert.deepEqual(rows.map(r => r.presence), ["online", "online", "unknown"]);
 
 console.log("tester table: ok");
