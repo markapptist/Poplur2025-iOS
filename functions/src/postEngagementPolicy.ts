@@ -2,6 +2,11 @@ import { createHash } from "node:crypto";
 
 export const POST_ENGAGEMENT_KINDS = ["view", "like", "dislike", "comment"] as const;
 export type PostEngagementKind = typeof POST_ENGAGEMENT_KINDS[number];
+/** Which screen produced the tap. A label for the owner's desk, carried on
+ *  the private engagement document only — never a grant input, never on the
+ *  world-readable radius history, never on the post. Older clients send none. */
+export const POST_ENGAGEMENT_SURFACES = ["feed", "map", "profile", "unknown"] as const;
+export type PostEngagementSurface = typeof POST_ENGAGEMENT_SURFACES[number];
 
 /** The top of the radius scale is the Earth's own radius (6,371 km / 3,959
  *  mi), the ceiling every client surface counts "of". A post there has taken
@@ -33,12 +38,13 @@ export const RADIUS_DECAY_FLOOR_METERS = 10;
 
 const POST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 const EVENT_ID_PATTERN = /^[A-Za-z0-9._:-]{16,128}$/;
-const ALLOWED_INPUT_KEYS = new Set(["postId", "eventId", "kind", "text"]);
+const ALLOWED_INPUT_KEYS = new Set(["postId", "eventId", "kind", "text", "surface"]);
 
 export interface PostEngagementInput {
   postId: string;
   eventId: string;
   kind: PostEngagementKind;
+  surface: PostEngagementSurface;
   text?: string;
 }
 
@@ -197,7 +203,7 @@ function plainObject(value: unknown): Record<string, unknown> | null {
 export function parsePostEngagementInput(value: unknown): PostEngagementInput {
   const row = plainObject(value);
   if (!row || Object.keys(row).some(key => !ALLOWED_INPUT_KEYS.has(key))) {
-    throw new PostEngagementValidationError("Send only postId, eventId and kind.");
+    throw new PostEngagementValidationError("Send only postId, eventId and kind (plus surface, and text for a comment).");
   }
   const postId = typeof row.postId === "string" ? row.postId.trim() : "";
   const eventId = typeof row.eventId === "string" ? row.eventId.trim() : "";
@@ -214,7 +220,23 @@ export function parsePostEngagementInput(value: unknown): PostEngagementInput {
   if (row.text !== undefined && (kind !== "comment" || typeof row.text !== "string" || !row.text.trim() || row.text.length > 500)) {
     throw new PostEngagementValidationError("Comment text must contain 1–500 characters and belong to a comment.");
   }
-  return { postId, eventId, kind: kind as PostEngagementKind, ...(typeof row.text === "string" ? { text: row.text.trim() } : {}) };
+  // The surface is a label, not a grant input, so a name this build does not
+  // know (or none at all, from an older client) is simply "unknown". Only
+  // junk that is not a string is refused, the way the other fields refuse it.
+  if (row.surface !== undefined && typeof row.surface !== "string") {
+    throw new PostEngagementValidationError("Invalid engagement surface.");
+  }
+  const surfaceName = typeof row.surface === "string" ? row.surface.trim() : "";
+  const surface = (POST_ENGAGEMENT_SURFACES as readonly string[]).includes(surfaceName)
+    ? surfaceName as PostEngagementSurface
+    : "unknown";
+  return {
+    postId,
+    eventId,
+    kind: kind as PostEngagementKind,
+    surface,
+    ...(typeof row.text === "string" ? { text: row.text.trim() } : {}),
+  };
 }
 
 /** Firestore ids never contain the caller's UID/event text directly. The hash

@@ -53,8 +53,10 @@ assert.equal(away.presenceSource, "lease");
 assert.equal(signupOnly.presence, "unknown");
 assert.equal(signupOnly.presenceSource, "none");
 
-// Post counts and the most recent post lead each row.
+// Post counts and the most recent post lead each row (the ledger path: a
+// caller that still holds the documents).
 assert.equal(online.postCount, 2);
+assert.equal(online.postCountSource, "ledger");
 assert.equal(online.lastPostedAtMs, NOW - 5000);
 assert.equal(online.posts[0].id, "post-aaaaaaaaaaaaaaaaaaaa1");
 assert.equal(online.posts[0].coarse.latitude, 43.6);
@@ -65,6 +67,7 @@ assert.equal(away.posts[0].mediaCount, 4);
 assert.equal(away.lastPostedAtMs, NOW - 100_000);
 assert.equal(signupOnly.postCount, 0);
 assert.equal(signupOnly.lastPostedAtMs, 0);
+assert.equal(signupOnly.postCountSource, "ledger");
 
 // Auth is the signup source; the profile supplies the username.
 assert.equal(online.signedUpAtMs, NOW - 86_400_000);
@@ -79,6 +82,62 @@ assert.ok(!rows.some(r => r.uid === ""));
 assert.deepEqual(rows.map(r => r.presence), ["online", "online", "unknown"]);
 
 console.log("tester table: ok");
+
+// --- the count() path: the dashboard's source since the read fix ------------
+// One count() and one newest-post read per tester replaced the newest-2,000
+// posts per call. A row built from them carries exact figures, says where
+// they came from, and no summaries: those load on expand (testerPosts).
+const { summarizeTesterPost } = require("../lib/testActivity.js");
+const counted = buildTesterTable({
+  now: NOW,
+  accounts: [
+    { uid: "u-online", displayName: "Ada", email: null, createdAtMs: NOW - 86_400_000, lastSignInAtMs: NOW - 1000 },
+    { uid: "u-signup-only", displayName: null, email: null, createdAtMs: NOW - 60_000, lastSignInAtMs: 0 },
+    { uid: "u-ledger-only", displayName: null, email: null, createdAtMs: NOW - 60_000, lastSignInAtMs: 0 },
+  ],
+  users: [],
+  heartbeats: [],
+  postStats: [
+    // More pops than any ledger slice would carry: the count is exact.
+    { uid: "u-online", postCount: 2_345, lastPostedAtMs: NOW - 5000 },
+    { uid: "u-signup-only", postCount: 0, lastPostedAtMs: 0 },
+    // A uid no other source knows still gets a row from its stats.
+    { uid: "u-stats-only", postCount: 1, lastPostedAtMs: NOW - 7000 },
+  ],
+  // A uid without a stats entry falls back to whatever ledger the caller holds.
+  ledger: [
+    { id: "post-aaaaaaaaaaaaaaaaaaaa9", userID: "u-ledger-only", createdAtMillis: NOW - 8000, radius: 5000 },
+    // Ignored for u-online: its stats entry wins and it carries no summaries.
+    { id: "post-aaaaaaaaaaaaaaaaaaaa8", userID: "u-online", createdAtMillis: NOW - 1, radius: 5000 },
+  ],
+});
+const byUid = new Map(counted.map(row => [row.uid, row]));
+assert.deepEqual([...byUid.keys()].sort(), ["u-ledger-only", "u-online", "u-signup-only", "u-stats-only"]);
+assert.equal(byUid.get("u-online").postCount, 2_345);
+assert.equal(byUid.get("u-online").lastPostedAtMs, NOW - 5000);
+assert.equal(byUid.get("u-online").postCountSource, "count");
+assert.deepEqual(byUid.get("u-online").posts, [], "the count path carries no summaries");
+assert.equal(byUid.get("u-signup-only").postCount, 0);
+assert.equal(byUid.get("u-signup-only").postCountSource, "count");
+assert.equal(byUid.get("u-stats-only").postCount, 1);
+assert.equal(byUid.get("u-ledger-only").postCount, 1);
+assert.equal(byUid.get("u-ledger-only").postCountSource, "ledger");
+assert.equal(byUid.get("u-ledger-only").posts[0].id, "post-aaaaaaaaaaaaaaaaaaaa9");
+// Junk from a stats source never becomes a negative or fractional count.
+const junk = buildTesterTable({ now: NOW, accounts: [], users: [], heartbeats: [], postStats: [{ uid: "u-junk", postCount: -3, lastPostedAtMs: NaN }] });
+assert.equal(junk[0].postCount, 0);
+assert.equal(junk[0].lastPostedAtMs, 0);
+
+// testerPosts describes a pop exactly the way the ledger path did.
+assert.deepEqual(
+  summarizeTesterPost("post-aaaaaaaaaaaaaaaaaaaa1", { createdAtMillis: NOW - 5000, radius: 5000, mediaType: "photo", latitude: 43.6, longitude: -79.4, caption: "  hi   there ", channelId: "food" }),
+  { id: "post-aaaaaaaaaaaaaaaaaaaa1", createdAtMs: NOW - 5000, radiusMeters: 5000, mediaType: "photo", mediaCount: 1, caption: "hi there", channelId: "food", coarse: { latitude: 43.6, longitude: -79.4 } },
+);
+assert.deepEqual(
+  summarizeTesterPost("post-aaaaaaaaaaaaaaaaaaaa3", { createdAt: ts(NOW - 100_000), radius: 99_000_000, mediaType: "video", mediaCount: 4 }),
+  { id: "post-aaaaaaaaaaaaaaaaaaaa3", createdAtMs: NOW - 100_000, radiusMeters: 40_075_000, mediaType: "video", mediaCount: 4, caption: "", channelId: "", coarse: null },
+);
+console.log("tester table count path: ok");
 
 // --- daily series: who joined and what was dropped, per calendar day ---------
 // The desk's "new testers per day" must mean people, so simulation accounts and
@@ -140,3 +199,61 @@ assert.equal(isSyntheticAccount("x", { accountType: "business" }, "shop@example.
 const flagged = buildTesterTable({ now: NOW, accounts: [{ uid: "u-sim", displayName: null, email: "u-sim@poplur.test", createdAtMs: NOW, lastSignInAtMs: 0 }], users: [], heartbeats: [], ledger: [] });
 assert.equal(flagged[0].synthetic, true);
 console.log("daily series: ok");
+
+// --- daily series, count() path: exact per-day totals, no ledger ------------
+// The dashboard now counts each strip day twice (every post, and the posts
+// stamped syntheticBeta) instead of bucketing a capped ledger slice. The
+// counts are exact, so the window is complete whatever any slice cap says;
+// a synthetic cell reads null while its composite index is still building.
+const { dailySeriesDayKeys, dailySeriesDayBounds } = require("../lib/testActivity.js");
+const keys = dailySeriesDayKeys(NOW, "UTC", 3);
+assert.deepEqual(keys, series.days.map(day => day.day), "the same keys the series buckets on");
+const countedSeries = buildDailySeries({
+  now: NOW,
+  timeZone: "UTC",
+  days: 3,
+  accounts: [
+    { uid: "u-real", displayName: "Ada", email: "ada@example.com", createdAtMs: NOW - 1000, lastSignInAtMs: NOW },
+    { uid: "u-sim", displayName: null, email: "u-sim@poplur.test", createdAtMs: NOW - DAY, lastSignInAtMs: 0 },
+  ],
+  users: [],
+  postCounts: {
+    [keys[2]]: { posts: 70, syntheticPosts: 64 },
+    [keys[1]]: { posts: 2, syntheticPosts: null },
+    // keys[0] absent: nothing counted, synthetic split unknown.
+  },
+  // A ledger supplied alongside counts is never consulted.
+  ledger: [{ id: "p1", userID: "u-real", createdAtMillis: NOW - 2000 }],
+  ledgerLimit: 1,
+});
+const [cDayBefore, cYesterday, cToday] = countedSeries.days;
+assert.deepEqual(cToday, { day: keys[2], signups: 1, syntheticSignups: 0, posts: 70, syntheticPosts: 64 });
+assert.deepEqual(cYesterday, { day: keys[1], signups: 1, syntheticSignups: 1, posts: 2, syntheticPosts: null });
+assert.deepEqual(cDayBefore, { day: keys[0], signups: 0, syntheticSignups: 0, posts: 0, syntheticPosts: null });
+assert.equal(countedSeries.postsComplete, true, "count() totals are exact, whatever the ledger cap");
+
+// The bounds a count() query is given cover each calendar day exactly once,
+// end to end, in the strip's own time zone — including the 25-hour day when
+// Toronto leaves DST (1 Nov 2026) and the 23-hour day when it enters it.
+const utcBounds = dailySeriesDayBounds(NOW, "UTC", 3);
+assert.deepEqual(utcBounds.map(bound => bound.day), keys);
+assert.equal(utcBounds[2].startMs, Date.UTC(2027, 0, 15), "NOW is 2027-01-15T08:00Z");
+assert.equal(utcBounds[2].endMs, Date.UTC(2027, 0, 16));
+for (let i = 1; i < utcBounds.length; i++) assert.equal(utcBounds[i].startMs, utcBounds[i - 1].endMs, "contiguous days");
+const dstEnd = dailySeriesDayBounds(Date.UTC(2026, 10, 2, 12), "America/Toronto", 3);
+assert.deepEqual(dstEnd.map(bound => bound.day), ["2026-10-31", "2026-11-01", "2026-11-02"]);
+assert.equal(dstEnd[0].startMs, Date.UTC(2026, 9, 31, 4), "EDT midnight");
+assert.equal(dstEnd[1].startMs, Date.UTC(2026, 10, 1, 4), "EDT midnight");
+assert.equal(dstEnd[2].startMs, Date.UTC(2026, 10, 2, 5), "EST midnight");
+assert.equal(dstEnd[2].endMs, Date.UTC(2026, 10, 3, 5));
+assert.equal(dstEnd[1].endMs - dstEnd[1].startMs, 25 * 3_600_000, "the fall-back day has 25 hours");
+for (let i = 1; i < dstEnd.length; i++) assert.equal(dstEnd[i].startMs, dstEnd[i - 1].endMs);
+const dstStart = dailySeriesDayBounds(Date.UTC(2026, 2, 9, 12), "America/Toronto", 2);
+assert.deepEqual(dstStart.map(bound => bound.day), ["2026-03-08", "2026-03-09"]);
+assert.equal(dstStart[0].endMs - dstStart[0].startMs, 23 * 3_600_000, "the spring-forward day has 23 hours");
+// Month and year roll over in the zone, not in UTC: 31 Dec 21:00 Toronto is
+// already 1 Jan in UTC, and the strip must still end on 31 Dec.
+const yearEnd = dailySeriesDayBounds(Date.UTC(2027, 0, 1, 2), "America/Toronto", 2);
+assert.deepEqual(yearEnd.map(bound => bound.day), ["2026-12-30", "2026-12-31"]);
+assert.equal(yearEnd[1].endMs, Date.UTC(2027, 0, 1, 5));
+console.log("daily series count path: ok");

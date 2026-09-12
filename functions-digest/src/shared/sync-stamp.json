@@ -1,0 +1,17 @@
+{
+  "syncedAtMillis": 1789195276373,
+  "policySha256": "daa7bd40809d30432c3ccddb66a7adb2a5893ab347909caa2230a8bce30325ec",
+  "identitySha256": "75ca3f7a71118cc35c67c62d4f5ae649729afa6688f3b03ad4cb6fe4a4e68f82",
+  "extracted": {
+    "sourceLines": {
+      "seedMeters": "functions/src/accountRadius.ts:30",
+      "boostDefaultMeters": "functions/src/index.ts:1155",
+      "boostDefaultHours": "functions/src/index.ts:1156",
+      "stressHalfLifeHours": "functions/src/syntheticRetentionPolicy.ts:4"
+    },
+    "seedMeters": 5000,
+    "boostDefaultMeters": 1000,
+    "boostDefaultHours": 24,
+    "stressHalfLifeHours": 4
+  }
+}

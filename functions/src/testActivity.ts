@@ -17,6 +17,7 @@ import {
   SYNTHETIC_RUNNER_CONFIG_DOC,
   SYNTHETIC_RUNNER_RUNTIME_DOC,
 } from "./syntheticBrowserRunner";
+import { isSyntheticAccount, isSyntheticPost } from "./syntheticIdentity";
 
 /**
  * Privacy-safe, opt-in operations telemetry for the September test cohort.
@@ -55,11 +56,22 @@ const EVENT_KINDS = new Set(["posted", "like", "view", "comment", "radius-up", "
 const FEEDBACK_LIMIT = 1_200;
 const ACTIVITY_LIMIT = 100;
 const POST_LIMIT = 120;
-/** The tester table reads every account and the newest slice of the real
- *  posts ledger. Beta-sized on purpose; both are one read. */
+/** The dashboard's slice of testBetaPosts. Smaller than the consent-clear
+ *  sweep above: the desk only draws the newest few dozen. */
+const DASHBOARD_BETA_POST_LIMIT = 40;
+/** The tester table reads every account (one read) and then, per account,
+ *  one count() and one newest-post read — ≈ 2 reads per tester instead of
+ *  the newest 2,000 posts per call. */
 const TESTER_TABLE_USER_LIMIT = 1000;
+/** The ledger path of buildDailySeries: how many posts a caller's slice may
+ *  hold before its oldest columns stop being trustworthy. The dashboard no
+ *  longer reads such a slice; it counts per day instead. */
 const TESTER_TABLE_POST_LIMIT = 2000;
 const TESTER_RECENT_POSTS = 24;
+/** Per-tester and per-day queries fan out in parallel, but not 2,000 at
+ *  once when the user cap is reached. */
+const TESTER_QUERY_CONCURRENCY = 32;
+const TESTER_UID_PATTERN = /^[A-Za-z0-9_-]{6,128}$/;
 /** A heartbeat this fresh is "online". Same window the activity rows use. */
 const ONLINE_WINDOW_MS = 90_000;
 
@@ -70,12 +82,25 @@ function finiteCoordinate(latitude: unknown, longitude: unknown): { latitude: nu
   return { latitude: lat, longitude: lng };
 }
 
+/** What one count() and one newest-post read say about a tester's pops. */
+export interface TesterPostStats {
+  uid: string;
+  postCount: number;
+  lastPostedAtMs: number;
+}
+
 export interface TesterTableInput {
   now: number;
   users: Array<{ uid: string; profile: FirebaseFirestore.DocumentData }>;
   accounts: Array<{ uid: string; displayName: string | null; email: string | null; createdAtMs: number; lastSignInAtMs: number }>;
   heartbeats: Array<{ uid: string } & FirebaseFirestore.DocumentData>;
-  ledger: Array<{ id: string } & FirebaseFirestore.DocumentData>;
+  /** The dashboard's source since the read fix: per tester, the count() and
+   *  limit(1) results. A uid with an entry here takes its figures from it and
+   *  carries no post summaries (those load lazily through `testerPosts`). */
+  postStats?: TesterPostStats[];
+  /** A slice of the posts ledger, for callers that hold the documents. A uid
+   *  without a postStats entry is summarised from here. */
+  ledger?: Array<{ id: string } & FirebaseFirestore.DocumentData>;
   /** Live foreground leases from appPresenceSessions, already filtered to
    *  activeUntil > now by the query. Optional so older callers keep working. */
   leases?: Array<{ uid: string; synthetic: boolean; activeUntilMs: number }>;
@@ -110,10 +135,30 @@ export interface TesterTableRow {
   platform: string;
   postCount: number;
   lastPostedAtMs: number;
+  /** Empty when `postCountSource` is "count": the desk fetches a row's pops
+   *  on expand (`testerPosts`) instead of carrying 24 per row per call. */
   posts: TesterPostSummary[];
+  /** Where postCount/lastPostedAtMs came from: a count() + limit(1) pair, or
+   *  a ledger slice the caller supplied. */
+  postCountSource: "count" | "ledger";
   /** A cohort actor, sim-daily account or other labelled simulation account.
    *  The desk counts these apart so "new testers" means people. */
   synthetic: boolean;
+}
+
+/** One pop as the tester table and `testerPosts` describe it: the coarse
+ *  cell only, never the exact drop point. */
+export function summarizeTesterPost(id: string, post: FirebaseFirestore.DocumentData): TesterPostSummary {
+  return {
+    id,
+    createdAtMs: safeMetric(post.createdAtMillis, 0, Number.MAX_SAFE_INTEGER) || timestampMs(post.createdAt),
+    radiusMeters: safeMetric(post.radius, 0, 40_075_000),
+    mediaType: post.mediaType === "video" ? "video" : "photo",
+    mediaCount: safeMetric(post.mediaCount, 1, 10, 1),
+    caption: text(post.caption, 120),
+    channelId: text(post.channelId, 64),
+    coarse: finiteCoordinate(post.latitude, post.longitude),
+  };
 }
 
 /**
@@ -135,27 +180,20 @@ export function buildTesterTable(input: TesterTableInput): TesterTableRow[] {
       leases.set(lease.uid, Math.max(leases.get(lease.uid) ?? 0, lease.activeUntilMs));
     }
   }
+  const stats = new Map((input.postStats ?? []).map(stat => [stat.uid, stat]));
   const byOwner = new Map<string, TesterPostSummary[]>();
-  for (const post of input.ledger) {
+  for (const post of input.ledger ?? []) {
     const owner = typeof post.userID === "string" ? post.userID : "";
     if (!owner) continue;
     const list = byOwner.get(owner) ?? [];
-    list.push({
-      id: post.id,
-      createdAtMs: safeMetric(post.createdAtMillis, 0, Number.MAX_SAFE_INTEGER) || timestampMs(post.createdAt),
-      radiusMeters: safeMetric(post.radius, 0, 40_075_000),
-      mediaType: post.mediaType === "video" ? "video" : "photo",
-      mediaCount: safeMetric(post.mediaCount, 1, 10, 1),
-      caption: text(post.caption, 120),
-      channelId: text(post.channelId, 64),
-      coarse: finiteCoordinate(post.latitude, post.longitude),
-    });
+    list.push(summarizeTesterPost(post.id, post));
     byOwner.set(owner, list);
   }
   // Every uid any source has seen. Auth first, so the signup date leads.
   const uids = new Set<string>([
     ...input.accounts.map(account => account.uid),
     ...input.users.map(user => user.uid),
+    ...stats.keys(),
     ...byOwner.keys(),
   ]);
   const accounts = new Map(input.accounts.map(account => [account.uid, account]));
@@ -171,7 +209,10 @@ export function buildTesterTable(input: TesterTableInput): TesterTableRow[] {
     const presenceSource: TesterTableRow["presenceSource"] = leaseUntilMs ? "lease" : beat ? "heartbeat" : "none";
     // The freshest thing we know about them, whichever signal it came from.
     const lastActivityAtMs = Math.max(heartbeatAtMs, leaseUntilMs ? input.now : 0, account?.lastSignInAtMs ?? 0);
-    const posts = (byOwner.get(uid) ?? []).sort((a, b) => b.createdAtMs - a.createdAtMs);
+    // A count() result is exact and carries no documents; a ledger slice is
+    // summarised the old way for callers that still hold one.
+    const stat = stats.get(uid);
+    const posts = stat ? [] : (byOwner.get(uid) ?? []).sort((a, b) => b.createdAtMs - a.createdAtMs);
     return {
       uid,
       label: labelFor(uid, profile, account?.displayName ?? null),
@@ -184,9 +225,10 @@ export function buildTesterTable(input: TesterTableInput): TesterTableRow[] {
       lastActivityAtMs,
       screen: text(beat?.screen, 40),
       platform: beat?.platform === "native" ? "native" : beat ? "browser" : "",
-      postCount: posts.length,
-      lastPostedAtMs: posts[0]?.createdAtMs ?? 0,
+      postCount: stat ? safeMetric(stat.postCount, 0, Number.MAX_SAFE_INTEGER) : posts.length,
+      lastPostedAtMs: stat ? safeMetric(stat.lastPostedAtMs, 0, Number.MAX_SAFE_INTEGER) : posts[0]?.createdAtMs ?? 0,
       posts: posts.slice(0, TESTER_RECENT_POSTS),
+      postCountSource: stat ? "count" : "ledger",
       synthetic: isSyntheticAccount(uid, profile, account?.email ?? null),
     };
   }).sort((a, b) => {
@@ -198,28 +240,10 @@ export function buildTesterTable(input: TesterTableInput): TesterTableRow[] {
   });
 }
 
-/** Every way a simulation account announces itself: the cohort actor ids
- *  (syntheticBetaCohort), the sim-daily flags on users/{uid}
- *  (syntheticDailySimulation writes syntheticBeta + syntheticSource), the
- *  labelled accountType, and the @poplur.test mailbox every provisioner uses. */
-export function isSyntheticAccount(uid: string, profile: FirebaseFirestore.DocumentData | undefined, email: string | null): boolean {
-  if (syntheticProfile(uid)) return true;
-  // Lab posters (synthetic-conquer-*) and sim-daily accounts carry it in the
-  // uid itself; Auth uids are random, so a prefix cannot collide with a person.
-  if (/^(synthetic-|sim-)/.test(uid)) return true;
-  if (profile?.syntheticBeta === true || profile?.syntheticCohort === true) return true;
-  if (typeof profile?.syntheticSource === "string" && profile.syntheticSource) return true;
-  if (typeof profile?.accountType === "string" && profile.accountType.toLowerCase().startsWith("synthetic")) return true;
-  return typeof email === "string" && email.toLowerCase().endsWith("@poplur.test");
-}
-
-/** A post is synthetic when its writer stamped it so, or when its owner is. */
-export function isSyntheticPost(post: FirebaseFirestore.DocumentData, ownerSynthetic: boolean): boolean {
-  return ownerSynthetic
-    || post.syntheticBeta === true
-    || post.syntheticCohort === true
-    || (typeof post.syntheticActorId === "string" && post.syntheticActorId !== "");
-}
+// The synthetic predicates live in syntheticIdentity.ts (pure, byte-copied
+// into the algorithm digest); re-exported so the tester table and its test
+// keep one import.
+export { isSyntheticAccount, isSyntheticPost };
 
 const DAILY_SERIES_DAYS = 14;
 /** The owner reads the desk from Toronto; days roll at that midnight. */
@@ -231,7 +255,9 @@ export interface DailyCount {
   signups: number;
   syntheticSignups: number;
   posts: number;
-  syntheticPosts: number;
+  /** null = unavailable: the count() path's synthetic split needs the
+   *  composite index (syntheticBeta, createdAt) and it is not READY yet. */
+  syntheticPosts: number | null;
 }
 
 export interface DailySeries {
@@ -239,40 +265,95 @@ export interface DailySeries {
   /** Oldest first, ending today; every day present, zero-filled. */
   days: DailyCount[];
   /** False when the posts ledger slice was capped before the window's oldest
-   *  day, so early columns may under-count pops. Signups come from Auth and
-   *  are always complete. */
+   *  day, so early columns may under-count pops. Always true on the count()
+   *  path, and signups come from Auth, so they are always complete. */
   postsComplete: boolean;
+}
+
+/** Exact per-day totals from two count() reads: every post, and the posts
+ *  stamped syntheticBeta. */
+export interface DailyPostCount {
+  posts: number;
+  syntheticPosts: number | null;
 }
 
 export interface DailySeriesInput {
   now: number;
   accounts: TesterTableInput["accounts"];
   users: TesterTableInput["users"];
-  ledger: TesterTableInput["ledger"];
+  /** The ledger path: pops bucketed from a slice of the posts ledger. */
+  ledger?: TesterTableInput["ledger"];
+  /** The count() path, keyed by day. When given, the ledger is not consulted
+   *  and postsComplete is true — the counts are exact, whatever the slice cap. */
+  postCounts?: Record<string, DailyPostCount>;
   days?: number;
   timeZone?: string;
   ledgerLimit?: number;
 }
 
+function dayKeyFormatter(timeZone: string): (ms: number) => string {
+  const format = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" });
+  return ms => format.format(new Date(ms));
+}
+
+/** Pure. The last `count` calendar days in `timeZone`, oldest first, ending
+ *  on the day that holds `now`. */
+export function dailySeriesDayKeys(now: number, timeZone: string, count: number): string[] {
+  const dayKey = dayKeyFormatter(timeZone);
+  // Walk back in half-day steps so a DST change can neither skip nor double a day.
+  const keys: string[] = [];
+  for (let step = 0; keys.length < count && step < count * 4; step++) {
+    const key = dayKey(now - step * 43_200_000);
+    if (!keys.includes(key)) keys.push(key);
+  }
+  return keys.reverse();
+}
+
+/** The wall clock `timeZone` shows at `ms`, re-read as if it were UTC. */
+function wallClockAsUtcMs(ms: number, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+  }).formatToParts(new Date(ms));
+  const field = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find(part => part.type === type)?.value);
+  return Date.UTC(field("year"), field("month") - 1, field("day"), field("hour"), field("minute"), field("second"));
+}
+
+/** The instant local midnight of a YYYY-MM-DD day falls on in `timeZone`. */
+function zonedMidnightMs(dayKey: string, timeZone: string): number {
+  const [year, month, day] = dayKey.split("-").map(Number);
+  const wanted = Date.UTC(year, month - 1, day);
+  // Guess the wall clock is UTC, read back what the zone shows then, and
+  // shift by the difference — twice, so a DST edge between guess and answer
+  // settles (Toronto midnight is never inside the skipped hour).
+  let guess = wanted;
+  for (let pass = 0; pass < 2; pass++) guess += wanted - wallClockAsUtcMs(guess, timeZone);
+  return guess;
+}
+
+/** Pure. The day keys with the half-open [startMs, endMs) instant each one
+ *  spans, so a per-day count() query asks Firestore for exactly that day. */
+export function dailySeriesDayBounds(now: number, timeZone: string, count: number): Array<{ day: string; startMs: number; endMs: number }> {
+  const keys = dailySeriesDayKeys(now, timeZone, count);
+  const [lastYear, lastMonth, lastDay] = keys[keys.length - 1].split("-").map(Number);
+  const dayAfter = new Date(Date.UTC(lastYear, lastMonth - 1, lastDay + 1)).toISOString().slice(0, 10);
+  const starts = [...keys, dayAfter].map(key => zonedMidnightMs(key, timeZone));
+  return keys.map((day, index) => ({ day, startMs: starts[index], endMs: starts[index + 1] }));
+}
+
 /**
  * Pure. How many people joined and how many pops were dropped on each of the
- * last N calendar days, real and synthetic counted apart. Built from the same
- * Auth page, users slice and posts slice the tester table already holds, so
- * it costs the dashboard no extra reads.
+ * last N calendar days, real and synthetic counted apart. Signups come from
+ * the Auth page the tester table already holds; pops come from the
+ * dashboard's per-day count() reads (`postCounts`), or from a ledger slice
+ * for callers that still hold one.
  */
 export function buildDailySeries(input: DailySeriesInput): DailySeries {
   const timeZone = input.timeZone || DAILY_SERIES_TIME_ZONE;
   const count = Math.max(1, Math.min(input.days ?? DAILY_SERIES_DAYS, 90));
-  const format = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" });
-  const dayKey = (ms: number) => format.format(new Date(ms));
-  // Walk back in half-day steps so a DST change can neither skip nor double a day.
-  const keys: string[] = [];
-  for (let step = 0; keys.length < count && step < count * 4; step++) {
-    const key = dayKey(input.now - step * 43_200_000);
-    if (!keys.includes(key)) keys.push(key);
-  }
-  keys.reverse();
-  const byDay = new Map(keys.map(key => [key, { day: key, signups: 0, syntheticSignups: 0, posts: 0, syntheticPosts: 0 }]));
+  const dayKey = dayKeyFormatter(timeZone);
+  const keys = dailySeriesDayKeys(input.now, timeZone, count);
+  const byDay = new Map<string, DailyCount>(keys.map(key => [key, { day: key, signups: 0, syntheticSignups: 0, posts: 0, syntheticPosts: 0 }]));
   const profiles = new Map(input.users.map(user => [user.uid, user.profile]));
   const syntheticOwners = new Set<string>();
   const seen = new Set<string>();
@@ -288,8 +369,17 @@ export function buildDailySeries(input: DailySeriesInput): DailySeries {
     bucket.signups += 1;
     if (syntheticOwners.has(account.uid)) bucket.syntheticSignups += 1;
   }
+  if (input.postCounts) {
+    for (const key of keys) {
+      const cell = input.postCounts[key];
+      const bucket = byDay.get(key)!;
+      bucket.posts = safeMetric(cell?.posts, 0, Number.MAX_SAFE_INTEGER);
+      bucket.syntheticPosts = cell?.syntheticPosts == null ? null : safeMetric(cell.syntheticPosts, 0, Number.MAX_SAFE_INTEGER);
+    }
+    return { timeZone, days: keys.map(key => byDay.get(key)!), postsComplete: true };
+  }
   let oldestPostMs = Number.POSITIVE_INFINITY;
-  for (const post of input.ledger) {
+  for (const post of input.ledger ?? []) {
     const createdAtMs = safeMetric(post.createdAtMillis, 0, Number.MAX_SAFE_INTEGER) || timestampMs(post.createdAt);
     if (!createdAtMs) continue;
     oldestPostMs = Math.min(oldestPostMs, createdAtMs);
@@ -298,10 +388,10 @@ export function buildDailySeries(input: DailySeriesInput): DailySeries {
     const owner = typeof post.userID === "string" ? post.userID : "";
     const ownerSynthetic = owner ? (syntheticOwners.has(owner) || isSyntheticAccount(owner, profiles.get(owner), null)) : false;
     bucket.posts += 1;
-    if (isSyntheticPost(post, ownerSynthetic)) bucket.syntheticPosts += 1;
+    if (isSyntheticPost(post, ownerSynthetic)) bucket.syntheticPosts = (bucket.syntheticPosts ?? 0) + 1;
   }
   const limit = input.ledgerLimit ?? TESTER_TABLE_POST_LIMIT;
-  const postsComplete = input.ledger.length < limit
+  const postsComplete = (input.ledger ?? []).length < limit
     || (Number.isFinite(oldestPostMs) && dayKey(oldestPostMs) < keys[0]);
   return { timeZone, days: keys.map(key => byDay.get(key)!), postsComplete };
 }
@@ -390,6 +480,77 @@ async function clearTelemetryForUser(uid: string): Promise<void> {
   posts.docs.forEach(doc => batch.delete(doc.ref));
   batch.delete(db().collection("testActivity").doc(uid));
   await batch.commit();
+}
+
+async function mapWithConcurrency<T, R>(items: readonly T[], limit: number, work: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await work(items[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+/** A tester's pops, newest first: the `userID` every writer sets, on the
+ *  (userID ASC, createdAt DESC) composite index. `createdAt`, not
+ *  `createdAtMillis`: AI-published posts carry only the former. */
+function testerPostsQuery(uid: string): FirebaseFirestore.Query {
+  return db().collection("posts").where("userID", "==", uid).orderBy("createdAt", "desc");
+}
+
+/** ≈ 2 reads per tester: a count() bills one read per 1,000 matches and the
+ *  newest post is one document. This replaced the newest-2,000-posts slice
+ *  that was ≈ 80 % of every dashboard call. */
+async function readTesterPostStats(uids: readonly string[]): Promise<TesterPostStats[]> {
+  return mapWithConcurrency(uids, TESTER_QUERY_CONCURRENCY, async uid => {
+    const [count, newest] = await Promise.all([
+      db().collection("posts").where("userID", "==", uid).count().get(),
+      testerPostsQuery(uid).limit(1).get(),
+    ]);
+    const post = newest.docs[0];
+    return {
+      uid,
+      postCount: count.data().count,
+      lastPostedAtMs: post ? summarizeTesterPost(post.id, post.data()).createdAtMs : 0,
+    };
+  });
+}
+
+/** Firestore refuses a query whose composite index is absent or still
+ *  building with FAILED_PRECONDITION (gRPC 9). Only that failure is
+ *  tolerated, and only per cell. */
+function isMissingIndexError(error: unknown): boolean {
+  const failure = error as { code?: unknown; message?: unknown } | null;
+  return failure?.code === 9
+    || failure?.code === "failed-precondition"
+    || /FAILED_PRECONDITION|requires an index/i.test(String(failure?.message ?? ""));
+}
+
+/** 28 count() reads per call: for each of the strip's days, every post and
+ *  the posts stamped syntheticBeta. Independent of the algorithm digest on
+ *  purpose, so the strip never reads zero because a digest is absent, stale
+ *  or capped. The synthetic split needs the (syntheticBeta ASC, createdAt ASC)
+ *  composite; until it is READY that cell reads null and nothing else waits. */
+async function readDailyPostCounts(
+  bounds: ReadonlyArray<{ day: string; startMs: number; endMs: number }>,
+): Promise<Record<string, DailyPostCount>> {
+  const cells = await mapWithConcurrency(bounds, TESTER_QUERY_CONCURRENCY, async ({ day, startMs, endMs }) => {
+    const inDay = db().collection("posts")
+      .where("createdAt", ">=", admin.firestore.Timestamp.fromMillis(startMs))
+      .where("createdAt", "<", admin.firestore.Timestamp.fromMillis(endMs));
+    const [posts, syntheticPosts] = await Promise.all([
+      inDay.count().get().then(snapshot => snapshot.data().count),
+      inDay.where("syntheticBeta", "==", true).count().get()
+        .then((snapshot): number | null => snapshot.data().count)
+        .catch(error => { if (isMissingIndexError(error)) return null; throw error; }),
+    ]);
+    return [day, { posts, syntheticPosts }] as const;
+  });
+  return Object.fromEntries(cells);
 }
 
 function labelFor(uid: string, profile: FirebaseFirestore.DocumentData | undefined, authName: unknown): string {
@@ -511,6 +672,7 @@ export const testActivityControl = onCall({ region: REGION, secrets: [BETA_DESK_
   const action = request.data?.action;
   const operatorAction = action === "dashboard"
     || action === "postHistory"
+    || action === "testerPosts"
     || action === "simulation"
     || action === "simulationStep"
     || action === "simulationPulse"
@@ -734,20 +896,34 @@ export const testActivityControl = onCall({ region: REGION, secrets: [BETA_DESK_
     };
   }
 
+  if (action === "testerPosts") {
+    requireAdmin(uid);
+    const testerUid = text(request.data?.uid, 128);
+    if (!TESTER_UID_PATTERN.test(testerUid)) {
+      throw new HttpsError("invalid-argument", "That tester uid is not one this desk can open.");
+    }
+    // A row's pops, fetched when the desk expands it: ≤ 24 reads per expand
+    // instead of 24 summaries per row per dashboard call.
+    const snapshot = await testerPostsQuery(testerUid).limit(TESTER_RECENT_POSTS).get();
+    return {
+      uid: testerUid,
+      generatedAtMs: Date.now(),
+      posts: snapshot.docs.map(doc => summarizeTesterPost(doc.id, doc.data())),
+    };
+  }
+
   if (action === "dashboard") {
     requireAdmin(uid);
     const now = Date.now();
-    const [activitySnapshot, postSnapshot, feedbackSnapshot, runtimeSnapshot, runnerConfigSnapshot, simulationConfigSnapshot, usersSnapshot, ledgerSnapshot, authPage, leaseSnapshot] = await Promise.all([
+    const [activitySnapshot, postSnapshot, feedbackSnapshot, runtimeSnapshot, runnerConfigSnapshot, simulationConfigSnapshot, usersSnapshot, authPage, leaseSnapshot] = await Promise.all([
       db().collection("testActivity").orderBy("lastActivityAt", "desc").limit(ACTIVITY_LIMIT).get(),
-      db().collection("testBetaPosts").orderBy("updatedAt", "desc").limit(POST_LIMIT).get(),
+      db().collection("testBetaPosts").orderBy("updatedAt", "desc").limit(DASHBOARD_BETA_POST_LIMIT).get(),
       db().collection("testFeedback").orderBy("createdAt", "desc").limit(FEEDBACK_LIST_LIMIT).get(),
       db().collection("testControl").doc(SYNTHETIC_RUNNER_RUNTIME_DOC).get(),
       db().collection("testControl").doc(SYNTHETIC_RUNNER_CONFIG_DOC).get(),
       db().collection("testControl").doc("simulation").get(),
-      // The tester table below. Beta scale: every account and the newest slice
-      // of the real posts ledger fit in one read each.
+      // The tester table below. Beta scale: every account fits in one read.
       db().collection("users").limit(TESTER_TABLE_USER_LIMIT).get(),
-      db().collection("posts").orderBy("createdAtMillis", "desc").limit(TESTER_TABLE_POST_LIMIT).get(),
       admin.auth().listUsers(TESTER_TABLE_USER_LIMIT).catch(() => null),
       // Foreground leases are the online source: every account writes one,
       // opted into activity sharing or not. Heartbeats only say which screen.
@@ -755,36 +931,33 @@ export const testActivityControl = onCall({ region: REGION, secrets: [BETA_DESK_
         .where("activeUntil", ">", admin.firestore.Timestamp.fromMillis(now))
         .select("uid", "synthetic", "activeUntil").get(),
     ]);
+    const users = usersSnapshot.docs.map(doc => ({ uid: doc.id, profile: doc.data() }));
+    const accounts = (authPage?.users ?? []).map(user => ({
+      uid: user.uid,
+      displayName: user.displayName ?? null,
+      email: user.email ?? null,
+      createdAtMs: Date.parse(user.metadata.creationTime ?? "") || 0,
+      lastSignInAtMs: Date.parse(user.metadata.lastSignInTime ?? "") || 0,
+    }));
+    // Per tester ≈ 2 reads and per strip day 2 count() reads, in place of the
+    // newest-2,000-posts slice that used to feed both.
+    const [postStats, postCounts] = await Promise.all([
+      readTesterPostStats([...new Set([...accounts.map(account => account.uid), ...users.map(user => user.uid)])]),
+      readDailyPostCounts(dailySeriesDayBounds(now, DAILY_SERIES_TIME_ZONE, DAILY_SERIES_DAYS)),
+    ]);
     const testers = buildTesterTable({
       now,
-      users: usersSnapshot.docs.map(doc => ({ uid: doc.id, profile: doc.data() })),
-      accounts: (authPage?.users ?? []).map(user => ({
-        uid: user.uid,
-        displayName: user.displayName ?? null,
-        email: user.email ?? null,
-        createdAtMs: Date.parse(user.metadata.creationTime ?? "") || 0,
-        lastSignInAtMs: Date.parse(user.metadata.lastSignInTime ?? "") || 0,
-      })),
+      users,
+      accounts,
       heartbeats: activitySnapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() })),
-      ledger: ledgerSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })),
+      postStats,
       leases: leaseSnapshot.docs.map(doc => ({
         uid: typeof doc.data().uid === "string" ? doc.data().uid : "",
         synthetic: doc.data().synthetic === true,
         activeUntilMs: doc.data().activeUntil?.toMillis?.() ?? 0,
       })),
     });
-    const daily = buildDailySeries({
-      now,
-      accounts: (authPage?.users ?? []).map(user => ({
-        uid: user.uid,
-        displayName: user.displayName ?? null,
-        email: user.email ?? null,
-        createdAtMs: Date.parse(user.metadata.creationTime ?? "") || 0,
-        lastSignInAtMs: Date.parse(user.metadata.lastSignInTime ?? "") || 0,
-      })),
-      users: usersSnapshot.docs.map(doc => ({ uid: doc.id, profile: doc.data() })),
-      ledger: ledgerSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })),
-    });
+    const daily = buildDailySeries({ now, accounts, users, postCounts });
     const posts = postSnapshot.docs.map(doc => {
       const post = doc.data();
       const postedAtMs = timestampMs(post.postedAt);

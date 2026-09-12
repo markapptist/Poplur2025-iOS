@@ -233,6 +233,20 @@
           "order": "DESCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "posts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "syntheticBeta",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": [
@@ -371,6 +385,26 @@
       "collectionGroup": "appPresenceSessions",
       "fieldPath": "expiresAt",
       "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "testControl",
+      "fieldPath": "days",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "testControl",
+      "fieldPath": "posts",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "testControl",
+      "fieldPath": "channels",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "testControl",
+      "fieldPath": "payload",
       "indexes": []
     }
   ]

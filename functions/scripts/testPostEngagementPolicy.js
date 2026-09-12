@@ -13,6 +13,7 @@ assert.deepEqual(parsed, {
   postId: "post-1",
   eventId: "evt_1234567890123456",
   kind: "comment",
+  surface: "unknown",
 });
 assert.throws(() => policy.parsePostEngagementInput({
   ...parsed,
@@ -22,6 +23,26 @@ assert.throws(() => policy.parsePostEngagementInput({
   ...parsed,
   kind: "set-radius",
 }), /unsupported engagement kind/i);
+
+// ── Surface: a label for the desk, never a grant input ────────────────────
+// Which screen produced the tap (feed / map / profile) rides the wire so the
+// owner's digest can count it per surface. Older clients send none; a name
+// this build does not know is "unknown"; only non-string junk is refused.
+assert.deepEqual(policy.POST_ENGAGEMENT_SURFACES, ["feed", "map", "profile", "unknown"]);
+for (const surface of policy.POST_ENGAGEMENT_SURFACES) {
+  assert.equal(policy.parsePostEngagementInput({ ...parsed, surface }).surface, surface);
+}
+assert.equal(policy.parsePostEngagementInput({ ...parsed, surface: " map " }).surface, "map", "trimmed like the other fields");
+assert.equal(policy.parsePostEngagementInput({ ...parsed, surface: "widget" }).surface, "unknown", "an unrecognised name is unknown, not an error");
+assert.equal(policy.parsePostEngagementInput({ ...parsed, surface: "" }).surface, "unknown");
+assert.equal(policy.parsePostEngagementInput({ postId: parsed.postId, eventId: parsed.eventId, kind: "like" }).surface, "unknown", "absent = older client");
+for (const junk of [42, null, true, { feed: true }, ["feed"]]) {
+  assert.throws(() => policy.parsePostEngagementInput({ ...parsed, surface: junk }), /invalid engagement surface/i);
+}
+// The surface never changes what a tap is worth.
+const fromMap = policy.calculatePostEngagementMutation({ radiusMeters: 5_000, likeCount: 0 }, "like", 100_000, null);
+assert.equal(fromMap.radiusDeltaMeters, 1_000);
+assert.equal("surface" in fromMap, false);
 
 const firstView = policy.calculatePostEngagementMutation(
   { radiusMeters: 5_000, viewCount: 4 },
@@ -254,6 +275,14 @@ assert.equal(stranger.radiusDeltaMeters, 1_000);
     kind: "like",
     engagementId: "abc",
   });
+  // The history is world-readable and actor-free: a surface handed to the
+  // entry builder never lands on it (the private engagement doc carries it).
+  assert.equal("surface" in policy.buildRadiusHistoryEntry({
+    atMillis: 100_000, cause: "engagement", writer: "recordPostEngagement",
+    previous: first.previous, next: first.counters,
+    seedRadiusMeters: first.radius.seed, boostedRadiusMeters: first.radius.boost,
+    kind: "like", engagementId: "abc", surface: "map",
+  }), false);
   // The first point of a curve steps from nothing.
   const born = policy.buildRadiusHistoryEntry({
     atMillis: 1, cause: "create", writer: "t", previous: null,
@@ -324,10 +353,12 @@ if (rulesPath) {
   // Creation must be seed-guarded too: without validNewPostEngagementSeed a
   // modified client mints a post already at world radius and skips the
   // engagement economy entirely.
-  assert.match(rules, /function validNewPostEngagementSeed\(\)/);
+  // Since 3b475aa4 the guard takes the creating account, so it can read the
+  // account's own earned total as the ceiling.
+  assert.match(rules, /function validNewPostEngagementSeed\(userId\)/);
   assert.match(
     rules,
-    /match \/posts\/\{postId\}[\s\S]*?allow create:[\s\S]*?validNewPostEngagementSeed\(\)/,
+    /match \/posts\/\{postId\}[\s\S]*?allow create:[\s\S]*?validNewPostEngagementSeed\(request\.auth\.uid\)/,
     "the posts create rule must apply the engagement seed guard",
   );
 }

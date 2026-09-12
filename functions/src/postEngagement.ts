@@ -234,6 +234,10 @@ export async function applyPostEngagement(uid: string, data: unknown) {
         clientEventId: input.eventId,
         ...(input.kind === "comment" && input.text ? { body: input.text } : {}),
         kind: input.kind,
+        // Which screen the tap came from, for the owner's desk. It lives on
+        // this private document only: the radius history is world-readable
+        // and the post is public, so neither carries it.
+        surface: input.surface,
         applied: mutation.applied,
         radiusDeltaMeters: mutation.radiusDeltaMeters,
         createdAt: FieldValue.serverTimestamp(),

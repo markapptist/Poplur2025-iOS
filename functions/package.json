@@ -22,7 +22,9 @@
     "seed:creator-credits": "node scripts/seedCreatorCreditBalances.js",
     "serve": "npm run build && firebase emulators:start --only auth,functions,firestore",
     "deploy": "npm run build && firebase deploy --only functions,firestore:rules",
-    "test:tester-table": "npm run build && node scripts/testTesterTable.js"
+    "test:tester-table": "npm run build && node scripts/testTesterTable.js",
+    "test:synthetic-identity": "npm run build && node scripts/testSyntheticIdentity.js",
+    "test:post-engagement-policy": "npm run build && node scripts/testPostEngagementPolicy.js ../lib/postEngagementPolicy.js ../firestore.rules"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",

@@ -7,6 +7,7 @@ import {
   digestWindowOpen, eligibleNearbyPost, nearbyDigestId, nearbyPopsNotification, orderNewestFirst,
   postCreatedAtMillis, postInViewerRadius, solarLocalHour,
 } from "./nearbyPopsPolicy";
+import { runAlgorithmDigest } from "./algorithmDigest";
 
 /**
  * The proactive push: hourly, for every account with a registered device,
@@ -175,5 +176,9 @@ export async function runNearbyPopsDigest(nowMillis = Date.now()) {
 
 export const nearbyPopsDigest = onSchedule(
   { schedule: "every 60 minutes", region: "us-central1", timeoutSeconds: 300, memory: "512MiB", cpu: 1, maxInstances: 1 },
-  async () => { await runNearbyPopsDigest(); },
+  async () => {
+    await runNearbyPopsDigest();
+    // The algorithm desk fold rides the same hour; the push is never blocked by it.
+    try { await runAlgorithmDigest(); } catch (error) { logger.error("algorithm digest failed", error); }
+  },
 );

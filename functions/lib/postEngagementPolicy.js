@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.PostEngagementValidationError = exports.radiusHistoryEntryId = exports.RADIUS_HISTORY_COLLECTION = exports.RADIUS_DECAY_FLOOR_METERS = exports.RADIUS_DECAY_PER_DAY = exports.REPEAT_VIEW_BASE_METERS = exports.REPEAT_VIEW_MIN_MS = exports.MAX_POST_ENGAGEMENT_COUNT = exports.MAX_POST_SEED_METERS = exports.MAX_POST_RADIUS_METERS = exports.POST_ENGAGEMENT_KINDS = void 0;
+exports.PostEngagementValidationError = exports.radiusHistoryEntryId = exports.RADIUS_HISTORY_COLLECTION = exports.RADIUS_DECAY_FLOOR_METERS = exports.RADIUS_DECAY_PER_DAY = exports.REPEAT_VIEW_BASE_METERS = exports.REPEAT_VIEW_MIN_MS = exports.MAX_POST_ENGAGEMENT_COUNT = exports.MAX_POST_SEED_METERS = exports.MAX_POST_RADIUS_METERS = exports.POST_ENGAGEMENT_SURFACES = exports.POST_ENGAGEMENT_KINDS = void 0;
 exports.buildRadiusHistoryEntry = buildRadiusHistoryEntry;
 exports.postRadiusParts = postRadiusParts;
 exports.parsePostEngagementInput = parsePostEngagementInput;
@@ -11,6 +11,10 @@ exports.calculateRadiusDecay = calculateRadiusDecay;
 exports.calculatePostEngagementMutation = calculatePostEngagementMutation;
 const node_crypto_1 = require("node:crypto");
 exports.POST_ENGAGEMENT_KINDS = ["view", "like", "dislike", "comment"];
+/** Which screen produced the tap. A label for the owner's desk, carried on
+ *  the private engagement document only — never a grant input, never on the
+ *  world-readable radius history, never on the post. Older clients send none. */
+exports.POST_ENGAGEMENT_SURFACES = ["feed", "map", "profile", "unknown"];
 /** The top of the radius scale is the Earth's own radius (6,371 km / 3,959
  *  mi), the ceiling every client surface counts "of". A post there has taken
  *  over the world — the clients treat it as reaching everyone — so no radius
@@ -40,7 +44,7 @@ exports.RADIUS_DECAY_PER_DAY = 0.05;
 exports.RADIUS_DECAY_FLOOR_METERS = 10;
 const POST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 const EVENT_ID_PATTERN = /^[A-Za-z0-9._:-]{16,128}$/;
-const ALLOWED_INPUT_KEYS = new Set(["postId", "eventId", "kind", "text"]);
+const ALLOWED_INPUT_KEYS = new Set(["postId", "eventId", "kind", "text", "surface"]);
 exports.RADIUS_HISTORY_COLLECTION = "radiusHistory";
 /** Pure: one history entry from the reach before and after a change. */
 function buildRadiusHistoryEntry(input) {
@@ -112,7 +116,7 @@ function plainObject(value) {
 function parsePostEngagementInput(value) {
     const row = plainObject(value);
     if (!row || Object.keys(row).some(key => !ALLOWED_INPUT_KEYS.has(key))) {
-        throw new PostEngagementValidationError("Send only postId, eventId and kind.");
+        throw new PostEngagementValidationError("Send only postId, eventId and kind (plus surface, and text for a comment).");
     }
     const postId = typeof row.postId === "string" ? row.postId.trim() : "";
     const eventId = typeof row.eventId === "string" ? row.eventId.trim() : "";
@@ -129,7 +133,23 @@ function parsePostEngagementInput(value) {
     if (row.text !== undefined && (kind !== "comment" || typeof row.text !== "string" || !row.text.trim() || row.text.length > 500)) {
         throw new PostEngagementValidationError("Comment text must contain 1–500 characters and belong to a comment.");
     }
-    return { postId, eventId, kind: kind, ...(typeof row.text === "string" ? { text: row.text.trim() } : {}) };
+    // The surface is a label, not a grant input, so a name this build does not
+    // know (or none at all, from an older client) is simply "unknown". Only
+    // junk that is not a string is refused, the way the other fields refuse it.
+    if (row.surface !== undefined && typeof row.surface !== "string") {
+        throw new PostEngagementValidationError("Invalid engagement surface.");
+    }
+    const surfaceName = typeof row.surface === "string" ? row.surface.trim() : "";
+    const surface = exports.POST_ENGAGEMENT_SURFACES.includes(surfaceName)
+        ? surfaceName
+        : "unknown";
+    return {
+        postId,
+        eventId,
+        kind: kind,
+        surface,
+        ...(typeof row.text === "string" ? { text: row.text.trim() } : {}),
+    };
 }
 /** Firestore ids never contain the caller's UID/event text directly. The hash
  * still makes one event idempotent for one signed-in actor on one post. */

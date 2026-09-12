@@ -8,8 +8,11 @@
   "main": "lib/index.js",
   "scripts": {
     "build": "tsc",
-    "test": "npm run build && node scripts/testNearbyPopsPolicy.js",
-    "test:nearby-pops": "npm run build && node scripts/testNearbyPopsPolicy.js"
+    "sync:shared": "node scripts/syncShared.js",
+    "test": "npm run build && node scripts/testNearbyPopsPolicy.js && node scripts/testSharedSync.js && node scripts/testAlgorithmDigestPolicy.js",
+    "test:nearby-pops": "npm run build && node scripts/testNearbyPopsPolicy.js",
+    "test:shared-sync": "npm run build && node scripts/testSharedSync.js",
+    "test:algorithm-digest": "npm run build && node scripts/testAlgorithmDigestPolicy.js"
   },
   "dependencies": {
     "firebase-admin": "^13.10.0",
