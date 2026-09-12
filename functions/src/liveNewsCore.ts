@@ -16,6 +16,7 @@ export interface LiveNewsSource {
 }
 
 export interface LiveNewsMedia {
+  embedUrl?: string;
   kind: "photo" | "video";
   src: string;
   poster?: string;
@@ -24,7 +25,20 @@ export interface LiveNewsMedia {
   rights: "provider-thumbnail" | "official-embed" | "licensed";
 }
 
+export interface LiveNewsAuthor {
+  id: string;
+  name: string;
+  handle: string;
+  avatar?: string;
+  bio?: string;
+  profileUrl: string;
+  platform: "Bluesky";
+  region: string;
+}
+
 export interface LiveNewsEvent {
+  author?: LiveNewsAuthor;
+  hashtags?: string[];
   id: string;
   title: string;
   summary: string;
@@ -448,6 +462,7 @@ export function preserveLiveNewsIds(next: LiveNewsEvent[], previous: LiveNewsEve
     const match = previous.find(candidate => {
       if (claimed.has(candidate.id)) return false;
       if (candidate.sources.some(source => nextUrls.has(canonicalArticleUrl(source.url)))) return true;
+      if (event.author || candidate.author) return false; // Social posts keep their own immutable identity.
       return candidate.category === event.category
         && sameLocation(candidate.coords, event.coords)
         && titleSimilarity(candidate.title, event.title) >= 0.4;

@@ -374,6 +374,8 @@ function preserveLiveNewsIds(next, previous) {
                 return false;
             if (candidate.sources.some(source => nextUrls.has(canonicalArticleUrl(source.url))))
                 return true;
+            if (event.author || candidate.author)
+                return false; // Social posts keep their own immutable identity.
             return candidate.category === event.category
                 && sameLocation(candidate.coords, event.coords)
                 && titleSimilarity(candidate.title, event.title) >= 0.4;

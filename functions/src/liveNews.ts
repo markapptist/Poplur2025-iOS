@@ -1,3 +1,4 @@
+import { fetchSocialNews } from "./liveNewsSocial";
 import { fetchRssNews } from "./liveNewsRss";
 import * as admin from "firebase-admin";
 import { randomUUID } from "crypto";
@@ -54,7 +55,7 @@ function paceProviderRequest(): Promise<void> {
 }
 const GEO_RESPONSE_LIMIT = 8 * 1024 * 1024;
 const DOC_RESPONSE_LIMIT = 5 * 1024 * 1024;
-const MAX_PUBLIC_EVENTS = 40;
+const MAX_PUBLIC_EVENTS = 120;
 
 type QueryDefinition = {
   category: string;
@@ -92,7 +93,7 @@ const QUERY_DEFINITIONS: QueryDefinition[] = [
 
 type PublicSnapshot = {
   schemaVersion: 1;
-  provider: "publisher-rss+gdelt";
+  provider: "social+publisher-rss+gdelt";
   generatedAt: string;
   checkedAt: string;
   contentHash: string;
@@ -298,7 +299,7 @@ async function releaseFailedLease(token: string, error: unknown): Promise<void> 
 function makePublicSnapshot(events: LiveNewsEvent[], generatedAt: string, checkedAt: string): PublicSnapshot {
   return {
     schemaVersion: 1,
-    provider: "publisher-rss+gdelt",
+    provider: "social+publisher-rss+gdelt",
     generatedAt,
     checkedAt,
     contentHash: liveNewsContentHash(events),
@@ -358,12 +359,12 @@ async function runLiveNewsRefresh(): Promise<void> {
     return;
   }
   try {
-    const [rss, provider] = await Promise.allSettled([fetchRssNews(), fetchProviderBatches()]);
+    const [rss, provider, social] = await Promise.allSettled([fetchRssNews(), fetchProviderBatches(), fetchSocialNews()]);
     const batches = provider.status === "fulfilled" ? provider.value : [];
     const located = buildLiveNewsEvents(batches, Date.now());
     const rssEvents = rss.status === "fulfilled" ? rss.value : [];
     const seen = new Set(located.flatMap(event => event.sources.map(source => source.url)));
-    const events = [...located, ...rssEvents.filter(event => !seen.has(event.sources[0].url))].slice(0, MAX_PUBLIC_EVENTS);
+    const events = [...(social.status === "fulfilled" ? social.value : []), ...located, ...rssEvents.filter(event => !seen.has(event.sources[0].url))].slice(0, MAX_PUBLIC_EVENTS);
     // Preserve the previous edition if every source is temporarily unavailable.
     if (events.length === 0) {
       await releaseFailedLease(token, new Error("live_news_no_locatable_events")).catch(() => undefined);
@@ -430,7 +431,9 @@ export const liveNewsApi = onRequest(
     cors: true,
     timeoutSeconds: 15,
     memory: "256MiB",
-    maxInstances: 20,
+    maxInstances: 5, // Cacheable read endpoint; stay within the shared regional CPU quota.
+    cpu: "gcf_gen1",
+    concurrency: 1,
   },
   async (request, response) => {
     response.set("Access-Control-Allow-Origin", "*");
@@ -476,7 +479,7 @@ export const liveNewsApi = onRequest(
       generatedAt,
       checkedAt,
       stale,
-      provider: "BBC News RSS + GDELT GEO 2.0 / DOC 2.0",
+      provider: "Public Bluesky accounts + BBC News RSS + GDELT",
       policy: data?.policy ?? makePublicSnapshot([], new Date(0).toISOString(), new Date(0).toISOString()).policy,
     };
     if (request.method === "HEAD") response.status(200).send("");
