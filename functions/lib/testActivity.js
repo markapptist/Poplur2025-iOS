@@ -106,6 +106,11 @@ const TESTER_QUERY_CONCURRENCY = 32;
 const TESTER_UID_PATTERN = /^[A-Za-z0-9_-]{6,128}$/;
 /** A heartbeat this fresh is "online". Same window the activity rows use. */
 const ONLINE_WINDOW_MS = 90_000;
+/** A runner session stays "live" in the runtime until the runner ends it,
+ *  which a crashed runner never does; its lastEventAtMs is the truth. Actors
+ *  report a step every few seconds to a couple of minutes, so a session this
+ *  quiet is a dead one, not a slow one. */
+const RUNNER_SESSION_STALE_MS = 10 * 60_000;
 function finiteCoordinate(latitude, longitude) {
     const lat = Number(latitude);
     const lng = Number(longitude);
@@ -151,6 +156,8 @@ function buildTesterTable(input) {
     const runnerLive = new Map();
     for (const session of input.runnerSessions ?? []) {
         if (!session.actorId || session.status !== "live")
+            continue;
+        if (!(session.lastEventAtMs > input.now - RUNNER_SESSION_STALE_MS))
             continue;
         const previous = runnerLive.get(session.actorId);
         if (!previous || session.lastEventAtMs > previous.atMs)

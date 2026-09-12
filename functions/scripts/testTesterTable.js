@@ -63,6 +63,9 @@ const withRunner = buildTesterTable({
   runnerSessions: [
     { actorId: "sim-food-001", status: "live", currentScreen: "feed", lastEventAtMs: NOW - 5000 },
     { actorId: "sim-news-005", status: "paused", currentScreen: "map", lastEventAtMs: NOW - 5000 },
+    // Still "live" in the runtime, but its last event is 20 minutes old: the
+    // runner died without ending it. Not in the app.
+    { actorId: "sim-tech-004", status: "live", currentScreen: "feed", lastEventAtMs: NOW - 20 * 60_000 },
   ],
 });
 const food = withRunner.find(r => r.uid === "sim-food-001");
@@ -71,6 +74,7 @@ assert.equal(food.presenceSource, "runner");
 assert.equal(food.screen, "feed");
 assert.equal(food.synthetic, true);
 assert.equal(withRunner.find(r => r.uid === "sim-news-005").presence, "unknown", "a paused session is not in the app");
+assert.equal(withRunner.find(r => r.uid === "sim-tech-004"), undefined, "a stale live session adds no row and no presence");
 
 // Post counts and the most recent post lead each row (the ledger path: a
 // caller that still holds the documents).
