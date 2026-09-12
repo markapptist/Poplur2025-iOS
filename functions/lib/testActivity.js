@@ -138,14 +138,23 @@ function buildTesterTable(input) {
     const profiles = new Map(input.users.map(user => [user.uid, user.profile]));
     const heartbeats = new Map(input.heartbeats.map(beat => [beat.uid, beat]));
     // One uid can hold several session leases; the freshest wins. Synthetic
-    // actors are counted elsewhere and must not read as human presence.
+    // leases count too (owner decision 12 Sep): the row's `synthetic` flag keeps
+    // the split visible, the presence does not hide it.
     const leases = new Map();
     for (const lease of input.leases ?? []) {
-        if (!lease.uid || lease.synthetic)
+        if (!lease.uid)
             continue;
         if (lease.activeUntilMs > input.now && lease.activeUntilMs <= input.now + appPresence_1.PRESENCE_LEASE_MS) {
             leases.set(lease.uid, Math.max(leases.get(lease.uid) ?? 0, lease.activeUntilMs));
         }
+    }
+    const runnerLive = new Map();
+    for (const session of input.runnerSessions ?? []) {
+        if (!session.actorId || session.status !== "live")
+            continue;
+        const previous = runnerLive.get(session.actorId);
+        if (!previous || session.lastEventAtMs > previous.atMs)
+            runnerLive.set(session.actorId, { screen: text(session.currentScreen, 40), atMs: session.lastEventAtMs });
     }
     const stats = new Map((input.postStats ?? []).map(stat => [stat.uid, stat]));
     const byOwner = new Map();
@@ -171,12 +180,13 @@ function buildTesterTable(input) {
         const beat = heartbeats.get(uid);
         const heartbeatAtMs = beat ? timestampMs(beat.lastActivityAt) : 0;
         const leaseUntilMs = leases.get(uid) ?? 0;
+        const runner = runnerLive.get(uid) ?? null;
         const heartbeatLive = input.now - heartbeatAtMs <= ONLINE_WINDOW_MS && heartbeatAtMs > 0;
-        const presence = leaseUntilMs || heartbeatLive ? "online"
+        const presence = leaseUntilMs || heartbeatLive || runner ? "online"
             : beat || account?.lastSignInAtMs ? "away" : "unknown";
-        const presenceSource = leaseUntilMs ? "lease" : beat ? "heartbeat" : "none";
+        const presenceSource = leaseUntilMs ? "lease" : heartbeatLive ? "heartbeat" : runner ? "runner" : beat ? "heartbeat" : "none";
         // The freshest thing we know about them, whichever signal it came from.
-        const lastActivityAtMs = Math.max(heartbeatAtMs, leaseUntilMs ? input.now : 0, account?.lastSignInAtMs ?? 0);
+        const lastActivityAtMs = Math.max(heartbeatAtMs, leaseUntilMs ? input.now : 0, runner?.atMs ?? 0, account?.lastSignInAtMs ?? 0);
         // A count() result is exact and carries no documents; a ledger slice is
         // summarised the old way for callers that still hold one.
         const stat = stats.get(uid);
@@ -191,7 +201,7 @@ function buildTesterTable(input) {
             presence,
             presenceSource,
             lastActivityAtMs,
-            screen: text(beat?.screen, 40),
+            screen: text(beat?.screen, 40) || runner?.screen || "",
             platform: beat?.platform === "native" ? "native" : beat ? "browser" : "",
             postCount: stat ? safeMetric(stat.postCount, 0, Number.MAX_SAFE_INTEGER) : posts.length,
             lastPostedAtMs: stat ? safeMetric(stat.lastPostedAtMs, 0, Number.MAX_SAFE_INTEGER) : posts[0]?.createdAtMs ?? 0,
@@ -827,12 +837,16 @@ exports.testActivityControl = (0, https_1.onCall)({ region: REGION, secrets: [BE
             readTesterPostStats([...new Set([...accounts.map(account => account.uid), ...users.map(user => user.uid)])]),
             readDailyPostCounts(dailySeriesDayBounds(now, DAILY_SERIES_TIME_ZONE, DAILY_SERIES_DAYS)),
         ]);
+        const runnerGenerationValue = runnerGeneration(runnerConfigSnapshot.data());
+        const runtime = currentRunnerRuntime(runtimeSnapshot.data(), runnerGenerationValue)
+            ?? (0, syntheticBetaCohort_1.emptySyntheticBrowserRuntime)(runnerGenerationValue, now);
         const testers = buildTesterTable({
             now,
             users,
             accounts,
             heartbeats: activitySnapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() })),
             postStats,
+            runnerSessions: runtime.sessions.map(session => ({ actorId: session.actorId, status: session.status, currentScreen: session.currentScreen, lastEventAtMs: session.lastEventAtMs })),
             leases: leaseSnapshot.docs.map(doc => ({
                 uid: typeof doc.data().uid === "string" ? doc.data().uid : "",
                 synthetic: doc.data().synthetic === true,
@@ -861,9 +875,6 @@ exports.testActivityControl = (0, https_1.onCall)({ region: REGION, secrets: [BE
         });
         const simulationEnabled = simulationConfigSnapshot.data()?.enabled === true;
         const runnerEnabled = runnerConfigSnapshot.data()?.enabled === true;
-        const runnerGenerationValue = runnerGeneration(runnerConfigSnapshot.data());
-        const runtime = currentRunnerRuntime(runtimeSnapshot.data(), runnerGenerationValue)
-            ?? (0, syntheticBetaCohort_1.emptySyntheticBrowserRuntime)(runnerGenerationValue, now);
         const runnerEvents = [...runtime.recentEvents]
             .sort((a, b) => b.eventAtMs - a.eventAtMs)
             .map(event => ({ id: event.eventId, ...event }));

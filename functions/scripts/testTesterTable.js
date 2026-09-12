@@ -27,7 +27,8 @@ const rows = buildTesterTable({
   leases: [
     // u-away has NO fresh heartbeat but holds a live foreground lease: online.
     { uid: "u-away", synthetic: false, activeUntilMs: NOW + 60_000 },
-    // A synthetic actor's lease never reads as a human being online.
+    // A synthetic actor's lease counts too (owner decision 12 Sep): the row's
+    // synthetic flag keeps the split, presence does not hide it.
     { uid: "u-signup-only", synthetic: true, activeUntilMs: NOW + 60_000 },
   ],
   ledger: [
@@ -42,7 +43,8 @@ const rows = buildTesterTable({
 assert.deepEqual(rows.map(r => r.uid).sort(), ["u-away", "u-online", "u-signup-only"]);
 
 // u-online is online by heartbeat alone; u-away is online by LEASE despite a
-// ten-minute-old heartbeat; the signup-only account's only lease is synthetic.
+// ten-minute-old heartbeat; the signup-only account's lease is synthetic and
+// counts all the same (owner decision 12 Sep: a tester in the app is online).
 const online = rows.find(r => r.uid === "u-online");
 const away = rows.find(r => r.uid === "u-away");
 const signupOnly = rows.find(r => r.uid === "u-signup-only");
@@ -50,8 +52,25 @@ assert.equal(online.presence, "online");
 assert.equal(online.presenceSource, "heartbeat");
 assert.equal(away.presence, "online");
 assert.equal(away.presenceSource, "lease");
-assert.equal(signupOnly.presence, "unknown");
-assert.equal(signupOnly.presenceSource, "none");
+assert.equal(signupOnly.presence, "online");
+assert.equal(signupOnly.presenceSource, "lease");
+
+// A live runner session is the same signal for an actor driving the app in a
+// headless browser, which writes no lease; its screen fills the STATUS cell.
+const withRunner = buildTesterTable({
+  now: NOW, accounts: [], users: [], heartbeats: [], ledger: [],
+  postStats: [{ uid: "sim-food-001", postCount: 4, lastPostedAtMs: NOW - 1000 }, { uid: "sim-news-005", postCount: 1, lastPostedAtMs: 0 }],
+  runnerSessions: [
+    { actorId: "sim-food-001", status: "live", currentScreen: "feed", lastEventAtMs: NOW - 5000 },
+    { actorId: "sim-news-005", status: "paused", currentScreen: "map", lastEventAtMs: NOW - 5000 },
+  ],
+});
+const food = withRunner.find(r => r.uid === "sim-food-001");
+assert.equal(food.presence, "online");
+assert.equal(food.presenceSource, "runner");
+assert.equal(food.screen, "feed");
+assert.equal(food.synthetic, true);
+assert.equal(withRunner.find(r => r.uid === "sim-news-005").presence, "unknown", "a paused session is not in the app");
 
 // Post counts and the most recent post lead each row (the ledger path: a
 // caller that still holds the documents).
@@ -78,8 +97,9 @@ assert.equal(signupOnly.username, "");
 // The orphan ledger row never becomes a tester.
 assert.ok(!rows.some(r => r.uid === ""));
 
-// Ordering: online first, unknown last.
-assert.deepEqual(rows.map(r => r.presence), ["online", "online", "unknown"]);
+// Ordering: every row here is online (two humans, one synthetic lease); the
+// runner fixture above covers the unknown tail.
+assert.deepEqual(rows.map(r => r.presence), ["online", "online", "online"]);
 
 console.log("tester table: ok");
 
