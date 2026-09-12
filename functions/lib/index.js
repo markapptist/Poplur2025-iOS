@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.syntheticDailySimulation = exports.poplurAiApi = exports.cameraSceneScan = exports.premiumAiAssist = exports.generateRetroGame = exports.testSessionIngest = exports.appPresence = exports.testActivityControl = exports.refreshLiveNews = exports.liveNewsApi = exports.wardrobeGarmentApi = exports.meshyStatus = exports.meshyGenerate = exports.setAccountLocationPrivacy = exports.notifyOnDirectMessage = exports.accountRadiusOnPostDeleted = exports.accountTotalRadiusOnPostWritten = exports.radiusHistoryOnPostCreated = exports.radiusDecay = exports.radiusDecayWorker = exports.radiusDecayDispatch = exports.radiusDecayIndexChanged = exports.repairMapDiscovery = exports.mapDiscoveryWorker = exports.mapDiscoveryEnqueue = exports.mapDiscoveryOwnerChanged = exports.mapDiscoveryEngagement = exports.mapDiscoveryPostChanged = exports.queryMapDiscovery = exports.recordPostEngagement = exports.notifyOnEngagement = exports.notifyOnRadiusLoss = exports.poplurPassOnProfileChange = exports.poplurPassWebService = exports.poplurOwnedCards = exports.poplurWalletPass = exports.verifyCardPurchase = void 0;
+exports.syntheticDailySimulation = exports.poplurAiApi = exports.cameraSceneScan = exports.premiumAiAssist = exports.generateRetroGame = exports.testSessionIngest = exports.appPresence = exports.notificationPreferences = exports.testActivityControl = exports.refreshLiveNews = exports.liveNewsApi = exports.wardrobeGarmentApi = exports.meshyStatus = exports.meshyGenerate = exports.setAccountLocationPrivacy = exports.notifyOnDirectMessage = exports.accountRadiusOnPostDeleted = exports.accountTotalRadiusOnPostWritten = exports.radiusHistoryOnPostCreated = exports.radiusDecay = exports.radiusDecayWorker = exports.radiusDecayDispatch = exports.radiusDecayIndexChanged = exports.repairMapDiscovery = exports.mapDiscoveryWorker = exports.mapDiscoveryEnqueue = exports.mapDiscoveryOwnerChanged = exports.mapDiscoveryEngagement = exports.mapDiscoveryPostChanged = exports.queryMapDiscovery = exports.recordPostEngagement = exports.notifyOnEngagement = exports.notifyOnRadiusLoss = exports.poplurPassOnProfileChange = exports.poplurPassWebService = exports.poplurOwnedCards = exports.poplurWalletPass = exports.verifyCardPurchase = void 0;
 const sdk_1 = __importDefault(require("@anthropic-ai/sdk"));
 const admin = __importStar(require("firebase-admin"));
 const firebase_functions_1 = require("firebase-functions");
@@ -96,6 +96,8 @@ Object.defineProperty(exports, "liveNewsApi", { enumerable: true, get: function 
 Object.defineProperty(exports, "refreshLiveNews", { enumerable: true, get: function () { return liveNews_1.refreshLiveNews; } });
 var testActivity_1 = require("./testActivity");
 Object.defineProperty(exports, "testActivityControl", { enumerable: true, get: function () { return testActivity_1.testActivityControl; } });
+var notificationPrefs_1 = require("./notificationPrefs");
+Object.defineProperty(exports, "notificationPreferences", { enumerable: true, get: function () { return notificationPrefs_1.notificationPreferences; } });
 var appPresence_1 = require("./appPresence");
 Object.defineProperty(exports, "appPresence", { enumerable: true, get: function () { return appPresence_1.appPresence; } });
 var syntheticBrowserRunner_1 = require("./syntheticBrowserRunner");

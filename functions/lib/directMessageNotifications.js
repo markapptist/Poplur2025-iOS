@@ -38,6 +38,7 @@ const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-admin/firestore");
 const firebase_functions_1 = require("firebase-functions");
 const firestore_2 = require("firebase-functions/v2/firestore");
+const notificationPrefs_1 = require("./notificationPrefs");
 if (admin.apps.length === 0)
     admin.initializeApp();
 const db = admin.firestore();
@@ -84,6 +85,10 @@ exports.notifyOnDirectMessage = (0, firestore_2.onDocumentCreated)({
         || (typeof sender.username === "string" && sender.username)
         || (typeof sender.displayName === "string" && sender.displayName)
         || "Someone on Poplur";
+    // Muting messages stops the push; the thread and its unread state are
+    // untouched, so nothing is lost — only the interruption.
+    if (!(0, notificationPrefs_1.pushAllowed)((0, notificationPrefs_1.prefsFromUser)(recipientSnapshot.data()), "messages"))
+        return;
     const tokenMap = (recipientSnapshot.data()?.fcmTokens ?? {});
     const notificationId = `dm:${threadId}:${messageId}`;
     const messagePreview = preview(message);

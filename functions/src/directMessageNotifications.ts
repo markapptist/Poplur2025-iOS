@@ -2,6 +2,7 @@ import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { logger } from "firebase-functions";
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
+import { prefsFromUser, pushAllowed } from "./notificationPrefs";
 
 if (admin.apps.length === 0) admin.initializeApp();
 
@@ -60,6 +61,9 @@ export const notifyOnDirectMessage = onDocumentCreated(
       || (typeof sender.username === "string" && sender.username)
       || (typeof sender.displayName === "string" && sender.displayName)
       || "Someone on Poplur";
+    // Muting messages stops the push; the thread and its unread state are
+    // untouched, so nothing is lost — only the interruption.
+    if (!pushAllowed(prefsFromUser(recipientSnapshot.data()), "messages")) return;
     const tokenMap = (recipientSnapshot.data()?.fcmTokens ?? {}) as Record<string, TokenEntry>;
     const notificationId = `dm:${threadId}:${messageId}`;
     const messagePreview = preview(message);

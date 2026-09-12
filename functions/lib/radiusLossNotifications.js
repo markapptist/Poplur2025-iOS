@@ -40,6 +40,7 @@ const firestore_1 = require("firebase-admin/firestore");
 const firestore_2 = require("firebase-functions/v2/firestore");
 const accountRadius_1 = require("./accountRadius");
 const radiusReminderPolicy_1 = require("./radiusReminderPolicy");
+const notificationPrefs_1 = require("./notificationPrefs");
 if (!admin.apps.length)
     admin.initializeApp();
 function radiusLossNotification(entry) {
@@ -76,6 +77,11 @@ exports.notifyOnRadiusLoss = (0, firestore_2.onDocumentCreated)({ document: 'pos
         });
         const data = user.data() || {};
         const registered = Object.keys(data.fcmTokens || {});
+        // Muted radius news never reserves the daily slot either — otherwise
+        // turning it back on could find the day already spent on a push nobody
+        // was sent.
+        if (!(0, notificationPrefs_1.pushAllowed)((0, notificationPrefs_1.prefsFromUser)(data), 'radius'))
+            return [];
         if (!registered.length || !(0, radiusReminderPolicy_1.radiusReminderDue)(data.radiusReminderAtMillis, Date.now()))
             return [];
         // One atomic reservation across all posts prevents simultaneous decay

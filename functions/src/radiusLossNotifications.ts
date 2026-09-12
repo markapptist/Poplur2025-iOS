@@ -3,6 +3,7 @@ import { FieldPath, FieldValue } from 'firebase-admin/firestore';
 import { onDocumentCreated } from 'firebase-functions/v2/firestore';
 import { postOwnerUid } from './accountRadius';
 import { radiusReminderDue } from './radiusReminderPolicy';
+import { prefsFromUser, pushAllowed } from './notificationPrefs';
 
 if (!admin.apps.length) admin.initializeApp();
 
@@ -38,6 +39,10 @@ export const notifyOnRadiusLoss = onDocumentCreated(
       });
       const data = user.data() || {};
       const registered = Object.keys(data.fcmTokens || {});
+      // Muted radius news never reserves the daily slot either — otherwise
+      // turning it back on could find the day already spent on a push nobody
+      // was sent.
+      if (!pushAllowed(prefsFromUser(data), 'radius')) return [] as string[];
       if (!registered.length || !radiusReminderDue(data.radiusReminderAtMillis, Date.now())) return [] as string[];
       // One atomic reservation across all posts prevents simultaneous decay
       // triggers from turning a daily reminder into a burst of pushes.

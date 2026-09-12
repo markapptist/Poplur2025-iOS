@@ -45,6 +45,7 @@ export { meshyGenerate, meshyStatus } from "./meshyModels";
 export { wardrobeGarmentApi } from "./wardrobeGarments";
 export { liveNewsApi, refreshLiveNews } from "./liveNews";
 export { testActivityControl } from "./testActivity";
+export { notificationPreferences } from "./notificationPrefs";
 export { appPresence } from "./appPresence";
 export { testSessionIngest } from "./syntheticBrowserRunner";
 export { generateRetroGame } from "./retro/generateRetroGame";

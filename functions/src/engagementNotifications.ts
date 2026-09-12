@@ -3,6 +3,7 @@ import { logger } from "firebase-functions";
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { FieldValue } from "firebase-admin/firestore";
 import { isSyntheticAccount } from "./syntheticIdentity";
+import { prefsFromUser, pushAllowed } from "./notificationPrefs";
 
 /**
  * Phase 3 of engagement push notifications: turn a new engagement document into
@@ -151,6 +152,13 @@ export const notifyOnEngagement = onDocumentCreated(
     if (!created) return;
 
     const userSnapshot = await db.collection("users").doc(ownerUid).get();
+    // The row above is written either way. This switch governs the PUSH: not
+    // being interrupted about views is not the same as not wanting to see them.
+    // Free to read — we already have the document for its tokens.
+    if (!pushAllowed(prefsFromUser(userSnapshot.data()), "engagement")) {
+      logger.debug("engagement push muted by preference", { ownerUid, postId, engagementId });
+      return;
+    }
     const tokenMap = (userSnapshot.data()?.fcmTokens ?? {}) as Record<string, TokenEntry>;
     const tokens = Object.keys(tokenMap);
     if (tokens.length === 0) {
