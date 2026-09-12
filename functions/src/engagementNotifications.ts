@@ -2,6 +2,7 @@ import * as admin from "firebase-admin";
 import { logger } from "firebase-functions";
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { FieldValue } from "firebase-admin/firestore";
+import { isSyntheticAccount } from "./syntheticIdentity";
 
 /**
  * Phase 3 of engagement push notifications: turn a new engagement document into
@@ -22,6 +23,21 @@ if (admin.apps.length === 0) admin.initializeApp();
 
 const db = admin.firestore();
 const messaging = admin.messaging();
+
+/** BETA PHASE (owner decision, 12 Sep 2026): a bot's attention is not news.
+ *  The synthetic cohort is the only thing engaging right now, and because
+ *  syntheticDailySimulation runs every 60 minutes and writes its whole batch at
+ *  once — while this trigger fires per engagement document with no coalescing —
+ *  it landed 32 banners on the owner's phone on the hour, every hour (804 in a
+ *  day). Simulation engagement no longer notifies: no push, and no inbox row
+ *  either, since a notification nobody should see is not worth storing.
+ *
+ *  Deliberately NOT suppressed anywhere else: the engagement documents
+ *  themselves are untouched, so the Test Center desk and the algorithm digest
+ *  still count every simulated view and comment. Only the human-facing alert
+ *  goes away. Flip this to true to watch the simulation land on a device again.
+ *  Real testers were never affected — they are not synthetic. */
+export const NOTIFY_FOR_SYNTHETIC_ENGAGEMENT = false;
 
 export type EngagementKind = "like" | "view" | "dislike" | "comment";
 
@@ -56,6 +72,28 @@ export function engagementNotification(engagement: EngagementDoc): { title: stri
   };
 }
 
+/** Whether an engagement came from a simulation account.
+ *
+ *  The uid-prefix rule in isSyntheticAccount answers for every cohort and lab
+ *  actor (`sim-`, `synthetic-`) with no read at all, which is the overwhelming
+ *  majority; only a sim-daily account that announces itself through a flag or a
+ *  poplur.test mailbox costs the users/{uid} lookup.
+ *
+ *  An engagement with no actorUid is NOT treated as synthetic: we cannot tell,
+ *  and silently dropping a real person's alert is the worse failure. Same rule
+ *  if the lookup throws — fail open and notify, exactly as before this gate. */
+export async function engagementIsSynthetic(actorUid: string | undefined): Promise<boolean> {
+  if (!actorUid) return false;
+  if (isSyntheticAccount(actorUid, null, null)) return true;
+  try {
+    const profile = (await db.collection("users").doc(actorUid).get()).data();
+    return isSyntheticAccount(actorUid, profile, typeof profile?.email === "string" ? profile.email : null);
+  } catch (error) {
+    logger.warn("could not classify engagement actor; notifying", { actorUid, error });
+    return false;
+  }
+}
+
 export const notifyOnEngagement = onDocumentCreated(
   {
     document: "posts/{postId}/engagements/{engagementId}",
@@ -76,6 +114,16 @@ export const notifyOnEngagement = onDocumentCreated(
 
     // Never notify someone about their own action on their own post.
     if (engagement.actorUid === ownerUid) return;
+
+    // A bot's view is not news — see NOTIFY_FOR_SYNTHETIC_ENGAGEMENT. Checked
+    // before the row is written, so the inbox stays as quiet as the lock screen.
+    // This also stops the cohort notifying ITSELF: bot-to-bot engagement was
+    // writing ~1,300 notification rows every three hours to accounts that hold
+    // no device tokens and will never read them.
+    if (!NOTIFY_FOR_SYNTHETIC_ENGAGEMENT && await engagementIsSynthetic(engagement.actorUid)) {
+      logger.debug("synthetic engagement, not notifying", { postId, engagementId, actorUid: engagement.actorUid });
+      return;
+    }
 
     // Stable event identity makes redelivery preserve read/dismiss state.
     const notificationId = `engagement:${postId}:${engagementId}`;
