@@ -349,6 +349,11 @@ extension PoplurInAppBrowserViewController: WKNavigationDelegate {
             decisionHandler(.cancel)
             return
         }
+        if navigationAction.targetFrame?.isMainFrame != false, let destination = Self.googleRedirectDestination(url) {
+            decisionHandler(.cancel)
+            webView.load(URLRequest(url: destination))
+            return
+        }
         if scheme == "https", url.user == nil, url.password == nil {
             decisionHandler(.allow)
             return
@@ -367,6 +372,25 @@ extension PoplurInAppBrowserViewController: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         clearLoadFailure()
+        // Google's Lucky endpoint can render a notice instead of an HTTP redirect.
+        guard let host = webView.url?.host?.lowercased(), ["google.com", "www.google.com"].contains(host) else { return }
+        webView.evaluateJavaScript("document.title.includes('Redirect Notice') || document.body.innerText.includes('Redirect Notice') ? document.querySelector('a[href^=\"https://\"]')?.href : null") { [weak webView] value, _ in
+            guard let webView, ["google.com", "www.google.com"].contains(webView.url?.host?.lowercased() ?? ""),
+                  let raw = value as? String, let destination = URL(string: raw),
+                  destination.scheme == "https", destination.user == nil, destination.password == nil,
+                  destination.host?.isEmpty == false, !["google.com", "www.google.com"].contains(destination.host!.lowercased()) else { return }
+            webView.load(URLRequest(url: destination))
+        }
+    }
+
+    static func googleRedirectDestination(_ url: URL) -> URL? {
+        guard ["google.com", "www.google.com"].contains(url.host?.lowercased() ?? ""), url.path == "/url",
+              let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let raw = parts.queryItems?.first(where: { $0.name == "q" || $0.name == "url" })?.value,
+              let target = URL(string: raw), target.scheme == "https", target.host?.isEmpty == false,
+              target.user == nil, target.password == nil,
+              !["google.com", "www.google.com"].contains(target.host!.lowercased()) else { return nil }
+        return target
     }
 
     func webView(
