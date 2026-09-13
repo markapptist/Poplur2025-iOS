@@ -161,6 +161,8 @@ enum WebPostPublisher {
             return extras
         }()
         PostUploadService.shared.nextCaption = body["caption"] as? String
+        PostUploadService.shared.nextContentType = body["contentType"] as? String
+        PostUploadService.shared.nextMessageCard = body["messageCard"] as? Bool
         PostUploadService.shared.nextChannelID = body["channelId"] as? String
         PostUploadService.shared.nextRequestID = body["requestId"] as? String
         PostUploadService.shared.nextPostID = postID

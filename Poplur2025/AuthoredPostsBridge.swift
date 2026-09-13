@@ -66,7 +66,7 @@ final class AuthoredPostsBridge {
         let fields = ["userID", "userId", "ownerId", "audience", "visibilityStatus", "status", "deleted", "isDeleted",
             "radiusMeters", "radius", "organicRadiusMeters", "seedRadiusMeters", "boostedRadiusMeters",
             "radiusDecayAnchorMillis", "radiusDecayOrganicPerDay", "radiusDecaySeedPerDay", "radiusDecayBoostPerDay", "playbackURL", "mediaURL",
-            "mediaType", "posterURL", "photoViewSeconds", "username", "handle", "displayName", "caption", "channelId",
+            "mediaType", "posterURL", "photoViewSeconds", "contentType", "messageCard", "username", "handle", "displayName", "caption", "channelId",
             "profilePictureURL", "avatarURL", "avatarUrl", "photoURL", "viewCount", "likeCount", "upvoteCount",
             "downvoteCount", "dislikeCount", "commentCount", "shareCount", "syntheticJourney", "syntheticBeta", "syntheticCohort"]
         var row: [String: Any] = [:]

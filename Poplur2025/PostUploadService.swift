@@ -58,6 +58,8 @@ final class PostUploadService {
         let usedAI: Bool
         let rightsAttestationVersion: String?
         let photoViewSeconds: Int?
+        let contentType: String
+        let messageCard: Bool
         /// Carousel slides AFTER the cover, already decoded, in display order.
         /// The cover is `payload` — it keeps the unchanged storage path so an
         /// old client reading mediaURL still finds a perfectly ordinary post.
@@ -98,6 +100,8 @@ final class PostUploadService {
     /// before posting. They apply to the next upload only.
     var nextRadiusMeters: Int?
     var nextCaption: String?
+    var nextContentType: String?
+    var nextMessageCard: Bool?
     var nextChannelID: String?
     /// Correlates the web composer's pending UI state with its native upload.
     /// Native capture flows do not set this, so their existing notifications
@@ -178,6 +182,8 @@ final class PostUploadService {
                     usedAI: publishContract.usedAI,
                     rightsAttestationVersion: publishContract.rightsAttestationVersion,
                     photoViewSeconds: publishContract.photoViewSeconds,
+                    contentType: publishContract.contentType,
+                    messageCard: publishContract.messageCard,
                     carouselExtras: takeCarouselExtras()
                 ))
             }
@@ -218,6 +224,8 @@ final class PostUploadService {
                     usedAI: publishContract.usedAI,
                     rightsAttestationVersion: publishContract.rightsAttestationVersion,
                     photoViewSeconds: publishContract.photoViewSeconds,
+                    contentType: publishContract.contentType,
+                    messageCard: publishContract.messageCard,
                     carouselExtras: takeCarouselExtras()
                 ))
             }
@@ -265,7 +273,9 @@ final class PostUploadService {
                         usedAI: publishContract.usedAI,
                         rightsAttestationVersion: publishContract.rightsAttestationVersion,
                         photoViewSeconds: publishContract.photoViewSeconds,
-                    carouselExtras: takeCarouselExtras()
+                        contentType: publishContract.contentType,
+                        messageCard: publishContract.messageCard,
+                        carouselExtras: takeCarouselExtras()
                     ))
                 } else if let videoURL = info["videoURL"] as? URL {
                     self.enqueue(UploadRequest(
@@ -276,7 +286,9 @@ final class PostUploadService {
                         usedAI: publishContract.usedAI,
                         rightsAttestationVersion: publishContract.rightsAttestationVersion,
                         photoViewSeconds: publishContract.photoViewSeconds,
-                    carouselExtras: takeCarouselExtras()
+                        contentType: publishContract.contentType,
+                        messageCard: publishContract.messageCard,
+                        carouselExtras: takeCarouselExtras()
                     ))
                 } else {
                     Self.report(success: false, message: "That post had no media to upload.", requestID: requestID)
@@ -379,6 +391,8 @@ final class PostUploadService {
                     usedAI: request.usedAI,
                     rightsAttestationVersion: request.rightsAttestationVersion,
                     photoViewSeconds: request.photoViewSeconds,
+                    contentType: request.contentType,
+                    messageCard: request.messageCard,
                     carouselExtras: request.carouselExtras
                 )
             case .video(let url):
@@ -394,7 +408,9 @@ final class PostUploadService {
                     locationVisibility: request.locationVisibility,
                     usedAI: request.usedAI,
                     rightsAttestationVersion: request.rightsAttestationVersion,
-                    photoViewSeconds: request.photoViewSeconds
+                    photoViewSeconds: request.photoViewSeconds,
+                    contentType: request.contentType,
+                    messageCard: request.messageCard
                 )
             }
             try Task.checkCancellation()
@@ -489,7 +505,9 @@ final class PostUploadService {
         locationVisibility: String,
         usedAI: Bool,
         rightsAttestationVersion: String?,
-        photoViewSeconds: Int?
+        photoViewSeconds: Int?,
+        contentType: String,
+        messageCard: Bool
     )? {
         defer {
             nextPostID = nil
@@ -498,6 +516,8 @@ final class PostUploadService {
             nextUsedAI = nil
             nextRightsAttestationVersion = nil
             nextPhotoViewSeconds = nil
+            nextContentType = nil
+            nextMessageCard = nil
         }
         let candidate = nextPostID ?? requestID
         guard let postID = Self.boundedPostID(candidate) else { return nil }
@@ -507,7 +527,9 @@ final class PostUploadService {
             nextLocationVisibility == "hidden" ? "hidden" : "approximate",
             nextUsedAI == true,
             nextRightsAttestationVersion,
-            nextPhotoViewSeconds
+            nextPhotoViewSeconds,
+            nextContentType == "message" ? "message" : "post",
+            nextContentType == "message" && nextMessageCard == true
         )
     }
 
@@ -547,6 +569,8 @@ final class PostUploadService {
         usedAI: Bool,
         rightsAttestationVersion: String?,
         photoViewSeconds: Int?,
+        contentType: String,
+        messageCard: Bool,
         carouselExtras: [Data] = []
     ) async throws {
         guard let data = image.poplur4KJPEGData() else {
@@ -614,7 +638,9 @@ final class PostUploadService {
                 locationVisibility: locationVisibility,
                 usedAI: usedAI,
                 rightsAttestationVersion: rightsAttestationVersion,
-                photoViewSeconds: photoViewSeconds
+                photoViewSeconds: photoViewSeconds,
+                contentType: contentType,
+                messageCard: messageCard
             )
         } catch {
             // A timeout can lose the acknowledgement after a successful save.
@@ -639,7 +665,9 @@ final class PostUploadService {
         locationVisibility: String,
         usedAI: Bool,
         rightsAttestationVersion: String?,
-        photoViewSeconds: Int?
+        photoViewSeconds: Int?,
+        contentType: String,
+        messageCard: Bool
     ) async throws {
         try Task.checkCancellation()
         guard let uid = Auth.auth().currentUser?.uid else {
@@ -700,7 +728,9 @@ final class PostUploadService {
                 locationVisibility: locationVisibility,
                 usedAI: usedAI,
                 rightsAttestationVersion: rightsAttestationVersion,
-                photoViewSeconds: photoViewSeconds
+                photoViewSeconds: photoViewSeconds,
+                contentType: contentType,
+                messageCard: messageCard
             )
         } catch {
             if let saved = try? await Firestore.firestore().collection("posts")
@@ -789,11 +819,15 @@ final class PostUploadService {
         locationVisibility: String,
         usedAI: Bool,
         rightsAttestationVersion: String?,
-        photoViewSeconds: Int?
+        photoViewSeconds: Int?,
+        contentType: String,
+        messageCard: Bool
     ) async throws {
         var post: [String: Any] = [
             "mediaURL": mediaURL,
             "mediaType": mediaType,
+            "contentType": contentType,
+            "messageCard": contentType == "message" && messageCard,
             "radius": radiusMeters,
             // Every metre a post is BORN with is a seed — the discovery
             // default and any ground claimed on top of it from the account's

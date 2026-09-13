@@ -2879,6 +2879,8 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                                 "mediaURL": mediaURL,
                                 "mediaType": (data["mediaType"] as? String) ?? inferredType,
                                 "photoViewSeconds": data["photoViewSeconds"] ?? NSNull(),
+                                "contentType": data["contentType"] as? String ?? "post",
+                                "messageCard": data["messageCard"] as? Bool ?? false,
                                 "createdAtMillis": createdMillis(data)
                             ]
                             if let poster = data["posterURL"] as? String, !poster.isEmpty {
@@ -3083,6 +3085,8 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                                 "mediaURL": mediaURL,
                                 "mediaType": (data["mediaType"] as? String) ?? inferredType,
                                 "photoViewSeconds": data["photoViewSeconds"] ?? NSNull(),
+                                "contentType": data["contentType"] as? String ?? "post",
+                                "messageCard": data["messageCard"] as? Bool ?? false,
                                 "createdAtMillis": createdMillis(data),
                                 "channelId": (data["channelId"] as? String) ?? "live"
                             ]
