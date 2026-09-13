@@ -534,12 +534,15 @@ export function renderReport(input: ReportRenderInput): ReportRender {
   const lastTrialDay = [...d30Days].reverse().find((d) => trialSeenOnDay(payload.days[d]) != null) ?? null;
   let firstLine: string;
   if (trialOnDay) {
-    const since = trial?.effectiveAtMillis != null ? utcStamp(trial.effectiveAtMillis) : "an unknown time (switch off at the writing run; the day's cells saw it)";
+    const since = trial?.effectiveAtMillis != null ? utcStamp(trial.effectiveAtMillis) : trial?.enabled === true ? "an unknown time (switch on at the writing run without an effective stamp)" : "an unknown time (switch off at the writing run; the day's cells saw it)";
     const boost = trial?.boostedEffectiveAtMillis != null ? ` (boost path since ${utcStamp(trial.boostedEffectiveAtMillis)})` : "";
     const seen = lossTrial > 0 ? `Seen on ${day}: ×${seenOnDay ?? "?"} on ${fmt(round(lossTrial))} m of real-post loss.` : `Seen on ${day}: none — no decay entry on a real post folded that day.`;
     firstLine = `DECAY TRIAL ×${trialMultiplierOnDay ?? "?"} ON since ${since}${boost} — every seed and every official anchor is decaying; the 5 km floor decision is not in force. ${seen} Anchors ${anchorsAtWorld}/${anchorsEver} at world.`;
   } else {
-    firstLine = `Decay ×1 · no trial · ${lastTrialDay ? `last trial multiplier seen on ${lastTrialDay}` : "no trial multiplier seen in 30 d"} (switch off at the writing run; no multiplier seen on ${day})`;
+    const switchNote = trial?.enabled === true
+      ? `switch ON ×${trial.multiplier ?? "?"} at the writing run, effective ${utcStamp(trial.effectiveAtMillis ?? null)} — after this day; no multiplier seen on ${day}`
+      : `switch off at the writing run; no multiplier seen on ${day}`;
+    firstLine = `Decay ×1 · no trial · ${lastTrialDay ? `last trial multiplier seen on ${lastTrialDay}` : "no trial multiplier seen in 30 d"} (${switchNote})`;
     if ((trialShareD30 ?? 0) >= RULES.gates.trialShareMax) firstLine += ` — 30-day window still mixed with trial loss (${fmt((trialShareD30 ?? 0) * 100, 1)} %); decay verdicts wait`;
   }
   const readsOnDay = input.readsOnDay;

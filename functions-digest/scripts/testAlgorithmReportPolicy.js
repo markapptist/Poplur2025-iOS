@@ -1090,6 +1090,9 @@ async function runLevelTests() {
     const old = longFirst.reports.find((r) => r.day === "2026-09-05");
     assert.ok(old, longFirst.reports.map((r) => r.day).join(","));
     assert.ok(old.document.firstLine.startsWith("Decay ×1 · no trial"), old.document.firstLine); assert.equal(old.document.trialOnDay, false); assert.equal(old.indexRow.trialOn, false);
+    // The parenthetical tells the truth about the writing run: the switch is ON, effective after this day — never "switch off".
+    assert.ok(old.document.firstLine.includes("(switch ON ×5 at the writing run, effective 8 Sep 00:07Z — after this day; no multiplier seen on 2026-09-05)"), old.document.firstLine);
+    assert.ok(!old.document.firstLine.includes("switch off"), old.document.firstLine);
     const longSecond = await run(longWorld, longFirst.state, T_NEXT + 105 * MIN);
     assert.equal(longSecond.reports.find((r) => r.day === "2026-09-07").document.trialOnDay, true, "the switch vouches for 7 Sep from 20:07 Toronto");
     const closed = first.reports.find((r) => r.day === DAY);
@@ -1110,6 +1113,7 @@ async function runLevelTests() {
     const quietDay = offRun.reports.find((r) => r.day === DAY).document;
     assert.equal(quietDay.trialOnDay, false, "the switch is off and D's cells saw nothing");
     assert.ok(quietDay.firstLine.startsWith("Decay ×1 · no trial · last trial multiplier seen on"), quietDay.firstLine);
+    assert.ok(quietDay.firstLine.includes(`(switch off at the writing run; no multiplier seen on ${DAY})`), quietDay.firstLine);
     assert.deepEqual(offRun.reports.map((r) => r.indexRow.trialOn), offRun.reports.map((r) => r.document.trialOnDay), "the identity columns follow the day");
   }
 
