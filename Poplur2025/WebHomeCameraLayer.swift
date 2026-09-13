@@ -293,6 +293,28 @@ final class WebHomeCameraModel: ObservableObject {
         publishCombinedDetections()
     }
 
+    /// The other half of `suspendCapture()`.
+    ///
+    /// Leaving the camera parks the sensor with `.leftCamera`, which
+    /// `cameraParkPlan` deliberately excludes from auto-resume — so coming back
+    /// left a frozen viewfinder until the user tapped it. The pairing was never
+    /// missing by design: it lived in `HomeView`, which does not mount while
+    /// `PoplurWebHome.isEnabled`, so under the shipping web home only the
+    /// suspend half ever ran.
+    ///
+    /// Safe against the thermal rule guarded elsewhere in this file:
+    /// `resumeCapture()` goes through `beginPreviewWindow`, which re-parks as
+    /// `.thermal` when `requiresEmergencyThermalPark` is set, and returns early
+    /// when a preview window is already open — so this is idempotent and cannot
+    /// defeat the tripwire. Visibility is the preview lease; this restores that
+    /// lease on genuine re-entry and nothing more. Thermal recovery still
+    /// requires the user's own gesture.
+    @MainActor
+    private func resumeCaptureForLiveCamera() {
+        guard let controller = controllerStorage, controller.isReady else { return }
+        controller.resumeCapture()
+    }
+
     private func publishCombinedDetections() {
         var payload: [[String: Any]] = []
         let recognized = recognitionManager?.recognizedUser
@@ -498,6 +520,7 @@ final class WebHomeCameraModel: ObservableObject {
                 activeTab = tab
                 if tab != "map" { nativeMapVisible = false }
                 liveCameraVisible = tab == "post" && webReportsLiveCamera
+                if liveCameraVisible { resumeCaptureForLiveCamera() }
                 if !liveCameraVisible {
                     if tab != "post" { webReportsLiveCamera = false }
                     CameraAIAnnouncer.shared.setLiveCameraActive(false)
@@ -528,6 +551,7 @@ final class WebHomeCameraModel: ObservableObject {
             }
             webReportsLiveCamera = visible
             liveCameraVisible = webReportsLiveCamera && activeTab == "post"
+            if liveCameraVisible { resumeCaptureForLiveCamera() }
             if !liveCameraVisible {
                 // Do not wait for SwiftUI's removal transaction before stopping
                 // speech; Camera Roll/composer must be silent immediately.
