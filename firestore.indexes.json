@@ -406,6 +406,66 @@
       "collectionGroup": "testControl",
       "fieldPath": "payload",
       "indexes": []
+    },
+    {
+      "collectionGroup": "daily",
+      "fieldPath": "verdicts",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "daily",
+      "fieldPath": "checks",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "daily",
+      "fieldPath": "epochs",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "daily",
+      "fieldPath": "evidence",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "daily",
+      "fieldPath": "previous",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "daily",
+      "fieldPath": "policy",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "daily",
+      "fieldPath": "headline",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "daily",
+      "fieldPath": "decision",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "daily",
+      "fieldPath": "csvColumns",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "daily",
+      "fieldPath": "supersedes",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "daily",
+      "fieldPath": "verdictCounts",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "testControl",
+      "fieldPath": "report",
+      "indexes": []
     }
   ]
 }

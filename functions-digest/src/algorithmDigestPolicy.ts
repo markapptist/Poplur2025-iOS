@@ -16,6 +16,8 @@ import { createHash } from "node:crypto";
 import * as policy from "./shared/postEngagementPolicy";
 import * as identity from "./shared/syntheticIdentity";
 import stampJson from "./shared/sync-stamp.json";
+import type { ReportState } from "./algorithmReportPolicy";
+import { emptyReportState, hydrateReportState, runReportStep } from "./algorithmReportPolicy";
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -53,6 +55,8 @@ export const CONTAMINATION_ROWS = 20;
 export const DECAY_WRITER = "radiusDecay";
 export const BACKFILL_WRITER = "backfillRadiusHistory";
 export const MAX_TRIAL_MULTIPLIER = 10;
+/** Per-day real-actor entries (fold addition 3) are kept this long: d30 plus a 7-day `before` window plus slack. */
+export const REAL_ACTOR_ENTRIES_DAYS = 45;
 
 export interface DigestConfig {
   enabled: boolean; maxReadsPerRun: number; horizonMs: number; daysPublished: number; channelLimit: number;
@@ -87,7 +91,7 @@ function measuredGrant(kind: policy.PostEngagementKind, actor: policy.PostEngage
   const post = { radiusMeters: 1_000_000, organicRadiusMeters: 1_000_000, seedRadiusMeters: 0, boostedRadiusMeters: 0 };
   return policy.calculatePostEngagementMutation(post, kind, 1_000_000_000_000, actor).radiusDeltaMeters;
 }
-function repeatLifetime(base: number): number {
+export function repeatLifetime(base: number): number {
   let total = 0;
   for (let n = 0; n < 64; n++) { const meters = Math.floor(base / 2 ** n); if (meters <= 0) break; total += meters; }
   return total;
@@ -116,10 +120,10 @@ export const KNOBS_SOURCE = "functions-digest/src/shared/postEngagementPolicy.ts
  *  floor), so a per-entry rate says nothing about the multiplier. */
 export const RATE_INFORMATIVE_MIN_ORGANIC = Math.floor(1 / (1 - Math.pow(1 - KNOBS.decayPerDay, 1 / 24)));
 
-function sha8(value: unknown): string {
+export function sha8(value: unknown): string {
   return createHash("sha256").update(canonicalJson(value)).digest("hex").slice(0, 8);
 }
-function canonicalJson(value: unknown): string {
+export function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   if (value && typeof value === "object") {
     const record = value as Record<string, unknown>;
@@ -224,10 +228,16 @@ export interface PostFold {
   days: Record<string, FoldDay>; modeCounts: ModeMeters; decayPaths: { organic: number; boost: number; seed: number };
   boostExpiresAtMillis: number | null; lastDecayRate: number | null; seededFromEntry: boolean; everPumped: boolean;
   other: { synthetic: number; lab: number; backfill: number; unknown: number }; resync: number;
+  /** Real-actor engagement entries by kind (view/like/comment/dislike), non-clamped — fold addition 1, forward-only. */
+  rk: KindCounts;
 }
+export interface KindCounts { v: number; l: number; c: number; d: number }
 export interface ActorGain {
   view: number; like: number; comment: number; dislike: number; total: number; n: number;
   firstViews: number; repeatViews: number; repeatMeters: number; clamped: number; resync: number;
+  /** A dislike whose partial delta hit zero (fold addition 2): `gain.dislike` still took the partial delta,
+   *  so dislikes are counted exactly as clamped + (|dislike m| − |clamped m|) / |grant|. */
+  clampedDislikes: number; clampedDislikeMeters: number;
 }
 export interface SurfaceCounts { feed: number; map: number; profile: number; unknown: number }
 export interface DayCell {
@@ -241,6 +251,9 @@ export interface DayCell {
   unknownActorEntries: { real: number; official: number };
   distinctRealViewers: number; distinctRealLikers: number; distinctRealCommenters: number;
   surfaces: SurfaceCounts; realSurfaces: SurfaceCounts;
+  /** STATE ONLY (fold addition 3): non-clamped real engagement entries on real posts per uid per kind, ≤ 16 uids + "other".
+   *  publishedDay strips it and publishes distinct counts; no uid reaches a published document. */
+  realActorEntries: Record<string, KindCounts>;
 }
 export interface ObservedKind { byMeters: Record<string, number>; min: number | null; max: number | null; n: number }
 export type ObservedDay = Record<string, ObservedKind>;
@@ -248,6 +261,9 @@ export interface LifetimeCoverage {
   entriesFolded: number; createFetched: number; createMissing: number; createSkipped: number;
   unknownCauses: Record<string, number>; resync: Record<string, number>; undeterminedMode: number;
   postsDeleted: number; evicted: number; sweptPosts: number; registryFull: boolean;
+  /** runStart of the run that introduced the three fold additions on a payload that already held entries; 0 when
+   *  they were introduced on an empty payload (every entry passed through the new code); null before either. */
+  kindSplitSinceMillis: number | null;
 }
 export interface Payload {
   postMeta: Record<string, PostMeta>; folds: Record<string, PostFold>; actorClassByUid: Record<string, ShortActor>;
@@ -259,25 +275,29 @@ export interface ObservedSignature {
 export interface ObservedVersion { version: string; fromMillis: number; signature: ObservedSignature }
 export interface DigestState {
   version: number; digestVersion: number; runId: string | null; leaseUntilMillis: number;
-  readsDay: string | null; readsToday: number;
+  readsDay: string | null; readsToday: number; runsToday: number;
+  /** The previous day's totals, stashed at the day roll so the report of D reads D's cost (§2.2 step 5). */
+  readsPrev: { day: string | null; reads: number; runs: number } | null;
   sweep: { cursor: SweepCursor | null; coldStartDone: boolean };
   refresh: { lastRefreshDay: string | null };
   observedPolicyVersions: ObservedVersion[]; authPageFailedRuns: number; lastResetAtMillis: number;
   payload: Payload;
+  /** The daily report's own state (algorithmReportPolicy.ts), stored as one JSON string beside `payload`. */
+  report: ReportState;
 }
 
 export function emptyPayload(): Payload {
   return {
     postMeta: {}, folds: {}, actorClassByUid: {}, realActorUids: [], days: {}, observed: {},
     coverage: { entriesFolded: 0, createFetched: 0, createMissing: 0, createSkipped: 0, unknownCauses: {}, resync: {},
-      undeterminedMode: 0, postsDeleted: 0, evicted: 0, sweptPosts: 0, registryFull: false },
+      undeterminedMode: 0, postsDeleted: 0, evicted: 0, sweptPosts: 0, registryFull: false, kindSplitSinceMillis: null },
   };
 }
 export function initialState(): DigestState {
   return {
-    version: DIGEST_SCHEMA_VERSION, digestVersion: 0, runId: null, leaseUntilMillis: 0, readsDay: null, readsToday: 0,
+    version: DIGEST_SCHEMA_VERSION, digestVersion: 0, runId: null, leaseUntilMillis: 0, readsDay: null, readsToday: 0, runsToday: 0, readsPrev: null,
     sweep: { cursor: null, coldStartDone: false }, refresh: { lastRefreshDay: null },
-    observedPolicyVersions: [], authPageFailedRuns: 0, lastResetAtMillis: 0, payload: emptyPayload(),
+    observedPolicyVersions: [], authPageFailedRuns: 0, lastResetAtMillis: 0, payload: emptyPayload(), report: emptyReportState(),
   };
 }
 
@@ -285,7 +305,8 @@ const zeroPool = (): Pool => ({ real: 0, owner: 0, review: 0, syn: 0, unknown: 0
 const zeroModes = (): ModeMeters => ({ normal: 0, trial: 0, stress: 0, undetermined: 0 });
 const zeroClasses = (): ClassMeters => ({ real: 0, owner: 0, review: 0, synthetic: 0, unknown: 0 });
 const zeroSurfaces = (): SurfaceCounts => ({ feed: 0, map: 0, profile: 0, unknown: 0 });
-const zeroGain = (): ActorGain => ({ view: 0, like: 0, comment: 0, dislike: 0, total: 0, n: 0, firstViews: 0, repeatViews: 0, repeatMeters: 0, clamped: 0, resync: 0 });
+const zeroGain = (): ActorGain => ({ view: 0, like: 0, comment: 0, dislike: 0, total: 0, n: 0, firstViews: 0, repeatViews: 0, repeatMeters: 0, clamped: 0, resync: 0, clampedDislikes: 0, clampedDislikeMeters: 0 });
+const zeroKinds = (): KindCounts => ({ v: 0, l: 0, c: 0, d: 0 });
 function newFold(): PostFold {
   return {
     seed: 0, birthSeed: 0, organic: 0, boost: 0, lastRadius: 0, peak: 0, peakOrganic: 0, peakAtMillis: null,
@@ -293,7 +314,7 @@ function newFold(): PostFold {
     pool: zeroPool(), lossDecay: { byMode: zeroModes(), byClass: zeroPool() }, seedLoss: 0, boostLoss: 0,
     firstRealAt: null, lastRealAt: null, zeroAt: null, days: {}, modeCounts: zeroModes(),
     decayPaths: { organic: 0, boost: 0, seed: 0 }, boostExpiresAtMillis: null, lastDecayRate: null,
-    seededFromEntry: false, everPumped: false, other: { synthetic: 0, lab: 0, backfill: 0, unknown: 0 }, resync: 0,
+    seededFromEntry: false, everPumped: false, other: { synthetic: 0, lab: 0, backfill: 0, unknown: 0 }, resync: 0, rk: zeroKinds(),
   };
 }
 export function emptyDayCell(day: string): DayCell {
@@ -305,6 +326,7 @@ export function emptyDayCell(day: string): DayCell {
     realPostDecayLoss: { byMode: zeroModes(), byClass: zeroClasses(), trialMultipliers: {} },
     realPostSeedLoss: 0, realPostBoostLoss: 0, boosts: { n: 0, meters: 0 }, unknownActorEntries: { real: 0, official: 0 },
     distinctRealViewers: 0, distinctRealLikers: 0, distinctRealCommenters: 0, surfaces: zeroSurfaces(), realSurfaces: zeroSurfaces(),
+    realActorEntries: {},
   };
 }
 function ensureDay(payload: Payload, day: string): DayCell {
@@ -336,8 +358,8 @@ function compact(value: unknown, key = ""): unknown {
     }
     return Object.keys(out).length ? out : undefined;
   }
-  // A viewCount sample of 0 is a sample; every other zero is a default.
-  if (key !== "vc" && (value === 0 || value === null || value === false || value === "")) return undefined;
+  // A viewCount sample of 0 is a sample and a kind-split stamp of 0 means "since the beginning"; every other zero is a default.
+  if (key !== "vc" && key !== "kindSplitSinceMillis" && (value === 0 || value === null || value === false || value === "")) return undefined;
   return value === undefined ? undefined : value;
 }
 const META_TEMPLATE: PostMeta = {
@@ -362,7 +384,11 @@ export function hydratePayload(stored: unknown): Payload {
     payload.folds[postId] = full;
   }
   for (const postId of Object.keys(payload.postMeta)) payload.folds[postId] ??= newFold();
-  for (const [day, cell] of Object.entries(payload.days)) payload.days[day] = withDefaults(emptyDayCell(day), cell);
+  for (const [day, cell] of Object.entries(payload.days)) {
+    const full = withDefaults(emptyDayCell(day), cell);
+    for (const [uid, counts] of Object.entries(full.realActorEntries)) full.realActorEntries[uid] = withDefaults(zeroKinds(), counts);
+    payload.days[day] = full;
+  }
   for (const observedDay of Object.values(payload.observed)) {
     for (const [key, slot] of Object.entries(observedDay)) observedDay[key] = withDefaults(OBSERVED_KIND_TEMPLATE, slot);
   }
@@ -386,7 +412,7 @@ export function millisOf(value: unknown): number | null {
   const nanos = finite(stamp.nanoseconds ?? stamp._nanoseconds) ?? 0;
   return seconds * 1000 + Math.floor(nanos / 1_000_000);
 }
-function round(value: number, places = 0): number { const scale = 10 ** places; return Math.round(value * scale) / scale; }
+export function round(value: number, places = 0): number { const scale = 10 ** places; return Math.round(value * scale) / scale; }
 function sumPool(pool: Pool): number { return pool.real + pool.owner + pool.review + pool.syn + pool.unknown; }
 function poolShares(pool: Pool): Pool {
   const total = sumPool(pool);
@@ -397,7 +423,7 @@ function bumpKey(map: Record<string, number>, key: string, limit = MAP_KEY_LIMIT
   const slot = key in map || Object.keys(map).length < limit ? key : "other";
   map[slot] = (map[slot] ?? 0) + 1;
 }
-function median(values: number[]): number | null {
+export function median(values: number[]): number | null {
   if (values.length === 0) return null;
   const sorted = [...values].sort((a, b) => a - b);
   const middle = Math.floor(sorted.length / 2);
@@ -408,14 +434,14 @@ function percentile(values: number[], p: number): number | null {
   const sorted = [...values].sort((a, b) => a - b);
   return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(p * sorted.length) - 1))];
 }
-function modeKey(map: Record<string, number>): number | null {
+export function modeKey(map: Record<string, number>): number | null {
   let best: string | null = null;
   for (const key of Object.keys(map).filter((k) => k !== "other").sort((a, b) => Number(a) - Number(b))) {
     if (best == null || map[key] > map[best]) best = key;
   }
   return best == null ? null : Number(best);
 }
-function maxKey(map: Record<string, number>): number | null {
+export function maxKey(map: Record<string, number>): number | null {
   const keys = Object.keys(map).filter((k) => k !== "other").map(Number);
   return keys.length ? Math.max(...keys) : null;
 }
@@ -637,8 +663,8 @@ export function inferDecayMode(input: DecayInferenceInput): DecayInference {
 
 // ── The fold ────────────────────────────────────────────────────────────────
 
-export interface ResolvedActor { cls: ActorClass; surface: Surface; joined: boolean }
-export const UNJOINED_ACTOR: ResolvedActor = Object.freeze({ cls: "unknown", surface: "unknown", joined: false });
+export interface ResolvedActor { cls: ActorClass; surface: Surface; joined: boolean; uid?: string | null }
+export const UNJOINED_ACTOR: ResolvedActor = Object.freeze({ cls: "unknown", surface: "unknown", joined: false, uid: null });
 export interface FoldRun { knobs: Knobs; timeZone: string; digestVersion: number; touchedDays: Set<string> }
 
 function poolKey(cls: ActorClass): keyof Pool { return cls === "synthetic" ? "syn" : cls; }
@@ -756,7 +782,10 @@ export function foldEntry(payload: Payload, postId: string, entry: ParsedEntry, 
       if (gain) {
         gain.n += 1; gain.total += delta;
         if (kind) gain[kind] += delta;
-        if (clamped) gain.clamped += 1;
+        if (clamped) {
+          gain.clamped += 1;
+          if (kind === "dislike") { gain.clampedDislikes += 1; gain.clampedDislikeMeters += delta; }
+        }
         else if (firstView) gain.firstViews += 1;
         else if (repeatView) { gain.repeatViews += 1; gain.repeatMeters += delta; }
       }
@@ -764,6 +793,14 @@ export function foldEntry(payload: Payload, postId: string, entry: ParsedEntry, 
         if (firstView) cell.distinctRealViewers += 1;
         if (kind === "like" && delta > 0) cell.distinctRealLikers += 1;
         if (kind === "comment" && delta > 0) cell.distinctRealCommenters += 1;
+        if (kind) {
+          const short = kind === "view" ? "v" : kind === "like" ? "l" : kind === "comment" ? "c" : "d";
+          fold.rk[short] += 1;
+          // Per uid per kind, the bumpKey discipline: the 17th uid and beyond share "other" (≤ 1 person, conservative).
+          const uid = resolved.uid || "other";
+          const slot = uid in cell.realActorEntries || Object.keys(cell.realActorEntries).length < MAP_KEY_LIMIT ? uid : "other";
+          (cell.realActorEntries[slot] ??= zeroKinds())[short] += 1;
+        }
       }
       addGain(fold, foldDay, cls, delta);
       if (cls === "real") { fold.firstRealAt ??= entry.atMillis; fold.lastRealAt = entry.atMillis; }
@@ -884,7 +921,7 @@ export function registerPost(payload: Payload, row: SweepRow, cls: "real" | "off
 
 // ── Observed policy (§2.5) ──────────────────────────────────────────────────
 
-function observedSlice(payload: Payload, days: string[]): ObservedDay {
+export function observedSlice(payload: Payload, days: string[]): ObservedDay {
   const merged: ObservedDay = {};
   for (const day of days) {
     const observedDay = payload.observed[day];
@@ -928,10 +965,17 @@ export interface FoldInput {
   state: DigestState; config: DigestConfig; switches: Switches; reader: DigestReader; runStartMillis: number; runId: string;
   knobs?: Knobs; stamp?: SyncStamp; timeZone?: string; fixedReads?: number;
 }
+export interface ReportWrite { day: string; document: Record<string, unknown>; indexRow: Record<string, unknown>; revision: number }
+export interface ReportStepResult {
+  reports: ReportWrite[]; reportIndex: Record<string, unknown> | null; reportDeferredReason: string | null;
+  amendDeferredReason: string | null; amendSkipped: string[]; reportBytes: number;
+  /** state.report as it was before this run's report step — what a retry-without-reports commits (§2.7). */
+  reportStateBefore: ReportState;
+}
 export type FoldOutcome =
   | { status: "auth-failed"; cost: RunCost }
   | { status: "ok"; state: DigestState; published: Record<string, unknown>; cost: RunCost; startCursors: StartCursors;
-      payloadBytes: number; publishedBytes: number; runCoverage: RunCoverage };
+      payloadBytes: number; publishedBytes: number; runCoverage: RunCoverage } & ReportStepResult;
 export interface RunCoverage {
   postsBehindHorizon: number; sweptPosts: number; evicted: number; trimmed: boolean; capped: boolean; postsDeleted: number;
   registeredThisRun: number; refreshed: boolean; payloadOverflow: boolean;
@@ -978,12 +1022,18 @@ export async function runDigestFold(input: FoldInput): Promise<FoldOutcome> {
   // this run began — before any reset — so a reset run can still commit.
   const startCursors = startCursorsOf(state);
   if (config.resetRequestedAtMillis != null && config.resetRequestedAtMillis > state.lastResetAtMillis) {
+    // The report's memory and the day's read counters survive a reset (decision 5): a re-fold must neither
+    // re-backfill nor overwrite written revisions, and a mid-day reset must not under-report readsOnDay.
     state = { ...initialState(), digestVersion: state.digestVersion, authPageFailedRuns: state.authPageFailedRuns,
-      observedPolicyVersions: state.observedPolicyVersions, lastResetAtMillis: config.resetRequestedAtMillis };
+      observedPolicyVersions: state.observedPolicyVersions, lastResetAtMillis: config.resetRequestedAtMillis,
+      report: state.report, readsPrev: state.readsPrev, readsDay: state.readsDay, readsToday: state.readsToday, runsToday: state.runsToday };
   }
   const digestVersion = state.digestVersion + 1;
   state.payload = hydratePayload(state.payload);
+  state.report = hydrateReportState(state.report);
   const payload = state.payload;
+  // Fold additions 1–3 accrue from here: entries folded before this stamp carry no kind split (§2.3 accrual rule).
+  if (payload.coverage.kindSplitSinceMillis == null) payload.coverage.kindSplitSinceMillis = payload.coverage.entriesFolded > 0 ? runStart : 0;
   const createSkippedBefore = payload.coverage.createSkipped;
   const today = dayKey(runStart, timeZone);
   // maxReadsPerRun bounds the whole run: the fixed reads are spent before any page.
@@ -1053,7 +1103,7 @@ export async function runDigestFold(input: FoldInput): Promise<FoldOutcome> {
       touchActor(payload, uid, cls);
     }
     if (cls === "real" && !payload.realActorUids.includes(uid) && payload.realActorUids.length < ACTOR_CACHE_LIMIT) payload.realActorUids.push(uid);
-    return { cls, surface, joined: true };
+    return { cls, surface, joined: true, uid };
   };
 
   // 4b. Per-post ledger pages, oldest cursor first (§3.2).
@@ -1141,8 +1191,11 @@ export async function runDigestFold(input: FoldInput): Promise<FoldOutcome> {
 
   // Cost and the day's running total.
   cost.reads += fixedReads;
-  if (state.readsDay !== today) { state.readsDay = today; state.readsToday = 0; }
-  state.readsToday += cost.reads;
+  if (state.readsDay !== today) {
+    state.readsPrev = { day: state.readsDay, reads: state.readsToday, runs: state.runsToday };
+    state.readsDay = today; state.readsToday = 0; state.runsToday = 0;
+  }
+  state.readsToday += cost.reads; state.runsToday += 1;
   state.digestVersion = digestVersion;
   state.runId = input.runId;
   state.leaseUntilMillis = 0;
@@ -1152,7 +1205,12 @@ export async function runDigestFold(input: FoldInput): Promise<FoldOutcome> {
   runCoverage.evicted += trim.evicted; runCoverage.trimmed = trim.trimmed; runCoverage.payloadOverflow = trim.overflow;
   const published = renderDigest({ state, config, switches: input.switches, runStartMillis: runStart, runId: input.runId, cost,
     runCoverage, knobs, stamp, timeZone });
-  return { status: "ok", state, published, cost, startCursors, payloadBytes: trim.bytes, publishedBytes: JSON.stringify(published).length, runCoverage };
+  // 8b. The daily report — a pure render of `published` + `state.payload`, never a re-scan (decision 1).
+  const report = runReportStep({ state, published, config, switches: input.switches, runStartMillis: runStart, runId: input.runId, cost,
+    runCoverage, knobs, stamp, timeZone });
+  cost.writes = WRITES_PER_RUN + report.reports.length + (report.reportIndex ? 1 : 0);
+  (published.cost as Record<string, unknown>).writes = cost.writes;
+  return { status: "ok", state, published, cost, startCursors, payloadBytes: trim.bytes, publishedBytes: JSON.stringify(published).length, runCoverage, ...report };
 }
 
 // ── Size guards ─────────────────────────────────────────────────────────────
@@ -1162,6 +1220,10 @@ export async function runDigestFold(input: FoldInput): Promise<FoldOutcome> {
  *  cells. Sizes are of the compact form, which is what gets stored. */
 export function trimPayload(payload: Payload, nowMillis: number, timeZone = TIME_ZONE,
   limits: { trim: number; hard: number } = { trim: PAYLOAD_TRIM_BYTES, hard: PAYLOAD_HARD_BYTES }): { bytes: number; evicted: number; trimmed: boolean; overflow: boolean } {
+  // Per-day real-actor entries (fold addition 3) are bounded by retention, not by size: cells older than 45 days
+  // keep every count and lose only the uid map. Runs every time, whatever the payload weighs.
+  const actorCutoff = dayKey(nowMillis - REAL_ACTOR_ENTRIES_DAYS * DAY_MS, timeZone);
+  for (const [day, cell] of Object.entries(payload.days)) if (day < actorCutoff && Object.keys(cell.realActorEntries).length) cell.realActorEntries = {};
   let bytes = compactPayloadBytes(payload);
   let evicted = 0;
   let trimmed = false;
@@ -1196,15 +1258,15 @@ export interface Gate { n: number; minN: number; sufficient: boolean; basis: str
 interface NetBucket { posts: number; netPositive: number; postDays: number; gainRealMeters: number; lossRealShareMeters: number; perPostDay: number | null }
 const emptyBucket = (): NetBucket => ({ posts: 0, netPositive: 0, postDays: 0, gainRealMeters: 0, lossRealShareMeters: 0, perPostDay: null });
 
-interface RenderInput {
+export interface RenderInput {
   state: DigestState; config: DigestConfig; switches: Switches; runStartMillis: number; runId: string; cost: RunCost;
   runCoverage: RunCoverage; knobs: Knobs; stamp: SyncStamp; timeZone: string;
 }
 
-function postEndMillis(meta: PostMeta, nowMillis: number): number {
+export function postEndMillis(meta: PostMeta, nowMillis: number): number {
   return Math.min(nowMillis, meta.expiredAtMillis ?? Number.POSITIVE_INFINITY, meta.deletedAtMillis ?? Number.POSITIVE_INFINITY);
 }
-function isLive(meta: PostMeta, fold: PostFold | undefined): boolean {
+export function isLive(meta: PostMeta, fold: PostFold | undefined): boolean {
   return meta.live && meta.deletedAtMillis == null && (fold?.lastRadius ?? meta.docRadiusMeters ?? 0) > 0;
 }
 function dominantMode(fold: PostFold): DecayMode | "none" {
@@ -1218,14 +1280,35 @@ function decayPathSeen(fold: PostFold): "organic" | "boost" | "seed" | "none" {
   const best = (["organic", "boost", "seed"] as const).filter((path) => paths[path] > 0).sort((a, b) => paths[b] - paths[a]);
   return best[0] ?? "none";
 }
-function publishedDay(cell: DayCell, inherited: string | null): Record<string, unknown> {
+/** Distinct-uid counts of a day's real-actor entries — what publishedDay prints in place of the uid map. */
+export function dayPeople(entries: Record<string, KindCounts>, events: number): { actors: number; viewers: number; likers: number; commenters: number; maxShare: number | null } {
+  let actors = 0, viewers = 0, likers = 0, commenters = 0, largest = 0;
+  for (const counts of Object.values(entries)) {
+    actors += 1;
+    if (counts.v > 0) viewers += 1;
+    if (counts.l > 0) likers += 1;
+    if (counts.c > 0) commenters += 1;
+    largest = Math.max(largest, counts.v + counts.l + counts.c + counts.d);
+  }
+  return { actors, viewers, likers, commenters, maxShare: events > 0 && actors > 0 ? round(largest / events, 4) : null };
+}
+/** The uid map never rides the spread (refuter 1): it is destructured OUT before `...rest`. */
+export function publishedDay(cell: DayCell, inherited: string | null = null): Record<string, unknown> {
   const { trialMultipliers, ...loss } = cell.realPostDecayLoss;
+  const { realActorEntries, ...rest } = cell;
   const seen = modeKey(trialMultipliers);
-  return { ...cell, observedPolicy: cell.observedPolicy ?? inherited,
-    realPostDecayLoss: { ...loss, trialMultiplierSeen: seen, inferred: true } };
+  return { ...rest, observedPolicy: cell.observedPolicy ?? inherited,
+    realPostDecayLoss: { ...loss, trialMultiplierSeen: seen, inferred: true },
+    people: dayPeople(realActorEntries, cell.realPostGain.real.n) };
 }
 
-function windowStats(input: RenderInput, days: string[]): Record<string, unknown> {
+/** The same window ending at an explicit instant: `windowStats` derives `now` from runStartMillis at every
+ *  site (window end, post end, the clip, ageDays), so overriding it moves all four together and a live post
+ *  cannot leak past the report's day (§2.1). */
+export function windowStatsAt(input: Pick<RenderInput, "state" | "timeZone">, days: string[], endMillis: number): Record<string, unknown> {
+  return windowStats({ ...input, runStartMillis: endMillis }, days);
+}
+export function windowStats(input: Pick<RenderInput, "state" | "runStartMillis" | "timeZone">, days: string[]): Record<string, unknown> {
   const { state, runStartMillis: now, timeZone } = input;
   const payload = state.payload;
   const sum = emptyDayCell("window") as unknown as Record<string, unknown>;
@@ -1236,7 +1319,7 @@ function windowStats(input: RenderInput, days: string[]): Record<string, unknown
     const cell = payload.days[day];
     if (cell.observedPolicy) inherited = cell.observedPolicy;
     if (days.includes(day)) {
-      const { day: _day, observedPolicy, ...numbers } = cell;
+      const { day: _day, observedPolicy, realActorEntries: _entries, ...numbers } = cell;
       addInto(sum, numbers as unknown as Record<string, unknown>);
       const version = observedPolicy ?? inherited;
       if (version) spanned.add(version);
@@ -1334,7 +1417,7 @@ export function decayCurve(startOrganic: number, options: { passMinutes?: number
   const days = (n: number | null) => n == null ? null : round(n * passMs / DAY_MS, 1);
   return { passes: organicZeroAt ?? passes, days: days(organicZeroAt ?? passes) ?? 0, seedPasses: seedZeroAt, seedDays: days(seedZeroAt), boostDays: days(boostZeroAt) };
 }
-function curveBlock(passMinutes: number, knobs: Knobs, medianTesterPeak: number | null, trial: { multiplier: number } | null): Record<string, unknown> {
+export function curveBlock(passMinutes: number, knobs: Knobs, medianTesterPeak: number | null, trial: { multiplier: number } | null): Record<string, unknown> {
   const multiplier = trial?.multiplier ?? 1;
   const at = (organic: number) => decayCurve(organic, { passMinutes, trial, knobs }).days;
   // Below this organic a pass at this multiplier loses exactly 1 m: the linear tail.
@@ -1447,16 +1530,19 @@ export function renderDigest(input: RenderInput): Record<string, unknown> {
     const current = accountLocation.get(meta.ownerUid);
     if (!current || meta.createdAtMillis > current.at) accountLocation.set(meta.ownerUid, { lat: meta.lat, lng: meta.lng, at: meta.createdAtMillis });
   }
-  let pairs = 0; const postsWithPair = new Set<string>();
+  let pairs = 0; let nearMissPairs = 0; const postsWithPair = new Set<string>();
   for (const [postId, meta] of realPosts) {
     const fold = foldOf(postId);
     if (!isLive(meta, fold) || meta.lat == null || meta.lng == null || !fold) continue;
     for (const [uid, location] of accountLocation) {
       if (uid === meta.ownerUid) continue;
-      if (haversineMeters(location.lat, location.lng, meta.lat, meta.lng) <= fold.lastRadius) { pairs += 1; postsWithPair.add(postId); }
+      const distance = haversineMeters(location.lat, location.lng, meta.lat, meta.lng);
+      if (distance <= fold.lastRadius) { pairs += 1; postsWithPair.add(postId); }
+      // Within twice the reach of a clean post (a pumped post's lastRadius includes synthetic organic) — the seedReach finding only.
+      else if (!fold.everPumped && distance <= 2 * fold.lastRadius) nearMissPairs += 1;
     }
   }
-  const intercept = { realized, opportunity: { pairs, postsWithAnyPair: postsWithPair.size, realAccountsWithLocation: accountLocation.size } };
+  const intercept = { realized, opportunity: { pairs, nearMissPairs, postsWithAnyPair: postsWithPair.size, realAccountsWithLocation: accountLocation.size } };
 
   // Channels (M10) over tester posts.
   const byChannel = new Map<string, [string, PostMeta][]>();

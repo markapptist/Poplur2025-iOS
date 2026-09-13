@@ -330,16 +330,17 @@ function buildWorld() {
   assert.equal(payload1.actorClassByUid[STRANGER], "r");
   assert.equal(payload1.actorClassByUid[GHOST], "u");
   assert.equal(published1.cost.capInForce, 6000);
-  assert.equal(published1.cost.writes, 3);
+  assert.equal(published1.cost.writes, 3 + 7 + 1, "state + published + lease, then the first-deploy backfill: 7 report days and the index (§2.7)");
+  assert.equal(run1.reports.length, 7); assert.ok(run1.reportIndex);
   assert.equal(run1.state.readsToday, published1.cost.reads);
   assert.equal(run1.state.digestVersion, 1);
   assert.equal(run1.state.refresh.lastRefreshDay, "2026-09-11");
 
   // M1 by kind and actor, 7 days.
   const g7 = published1.windows.d7.realPostGain;
-  assert.deepEqual(g7.real, { view: 2_875, like: 2_000, comment: 2_000, dislike: -1_000, total: 5_875, n: 9, firstViews: 2, repeatViews: 3, repeatMeters: 875, clamped: 0, resync: 1 });
-  assert.deepEqual(g7.owner, { view: 0, like: 1_000, comment: 0, dislike: 0, total: 1_000, n: 1, firstViews: 0, repeatViews: 0, repeatMeters: 0, clamped: 0, resync: 0 }, "mark engaging a stranger's post lands in owner, never real");
-  assert.deepEqual(g7.review, { view: 1_000, like: 0, comment: 0, dislike: 0, total: 1_000, n: 1, firstViews: 1, repeatViews: 0, repeatMeters: 0, clamped: 0, resync: 0 }, "a review tap never enters a REAL figure");
+  assert.deepEqual(g7.real, { view: 2_875, like: 2_000, comment: 2_000, dislike: -1_000, total: 5_875, n: 9, firstViews: 2, repeatViews: 3, repeatMeters: 875, clamped: 0, resync: 1, clampedDislikes: 0, clampedDislikeMeters: 0 });
+  assert.deepEqual(g7.owner, { view: 0, like: 1_000, comment: 0, dislike: 0, total: 1_000, n: 1, firstViews: 0, repeatViews: 0, repeatMeters: 0, clamped: 0, resync: 0, clampedDislikes: 0, clampedDislikeMeters: 0 }, "mark engaging a stranger's post lands in owner, never real");
+  assert.deepEqual(g7.review, { view: 1_000, like: 0, comment: 0, dislike: 0, total: 1_000, n: 1, firstViews: 1, repeatViews: 0, repeatMeters: 0, clamped: 0, resync: 0, clampedDislikes: 0, clampedDislikeMeters: 0 }, "a review tap never enters a REAL figure");
   assert.equal(g7.synthetic.total, 2_000); assert.equal(g7.synthetic.n, 2);
   assert.equal(g7.unknown.total, 2_000 + 58 * 500); assert.equal(g7.unknown.n, 60);
   assert.equal(published1.windows.d7.distinctRealViewers, 2);
@@ -350,6 +351,21 @@ function buildWorld() {
   assert.deepEqual(published1.windows.d7.unknownActorEntries, { real: 60, official: 0 });
   assert.equal(published1.windows.d30.realPostGain.real.like, 3_000, "the 11-day-old like on mark's post is inside 30 d");
   assert.equal(published1.windows.d7.boosts.n, 1); assert.equal(published1.windows.d7.boosts.meters, 1_000);
+
+  // Fold additions (reports design §2.3): real-actor kind counts on the fold, per-uid entries in the STATE day cell only,
+  // distinct counts on the published day, the kind-split stamp at 0 on a cold start.
+  assert.deepEqual(payload1.folds["post-tester-a-1"].rk, { v: 5, l: 1, c: 1, d: 1 }, "B's four views + the stranger's, B's like, comment and dislike; the resync, the owner, review, sim and ghost never count");
+  const c1Cell = payload1.days[day(T0 - 5 * D)];
+  assert.deepEqual(c1Cell.realActorEntries, { [TESTER_B]: { v: 4, l: 1, c: 1, d: 1 }, [STRANGER]: { v: 1, l: 0, c: 0, d: 0 } }, "per uid per kind, state only");
+  const c1Row = published1.days.find((row) => row.day === day(T0 - 5 * D));
+  assert.equal(c1Row.realActorEntries, undefined, "publishedDay strips the uid map");
+  assert.deepEqual(c1Row.people, { actors: 2, viewers: 2, likers: 1, commenters: 1, maxShare: 0.875 }, "…and publishes counts: B's 7 of the day's 8 real entries (the resync is in neither)");
+  assert.ok(!JSON.stringify(published1).includes(TESTER_B) && !JSON.stringify(published1).includes(STRANGER), "no uid reaches the published digest");
+  assert.equal(payload1.coverage.kindSplitSinceMillis, 0, "introduced on an empty payload: every entry passed through the new code");
+  assert.deepEqual(published1.windows.d7.realPostGain.real.clampedDislikes, 0);
+  assert.equal(typeof published1.intercept.opportunity.nearMissPairs, "number");
+  assert.equal(run1.state.runsToday, 1); assert.deepEqual(run1.state.readsPrev, { day: null, reads: 0, runs: 0 });
+  assert.equal(run1.state.report.lastReportedDay, "2026-09-05", "the cold start backfilled 7 days (30 Aug … 5 Sep) of the 14 the state holds cells for");
 
   // Resync counted, never in n, first/repeat or M16; clamped and repeat ladder in M16; backfill excluded.
   assert.deepEqual(published1.coverage.resync, { view: 1 });
@@ -552,6 +568,11 @@ function buildWorld() {
   assert.ok(digest.cursorsEqual(reset.startCursors, digest.startCursorsOf(run2.state)), "the commit still compares against the pre-reset cursors");
   assert.equal(reset.state.payload.coverage.entriesFolded, reset.cost.entriesProcessed, "everything re-folded from scratch");
   assert.equal(reset.state.digestVersion, 3);
+  assert.equal(reset.state.payload.coverage.kindSplitSinceMillis, 0, "a reset re-fold introduces the fold additions on an empty payload");
+  assert.equal(reset.state.report.lastReportedDay, run2.state.report.lastReportedDay, "the report's memory survives a reset (decision 5)");
+  assert.equal(reset.state.report.rows.length, run2.state.report.rows.length, "rows are superseded in place, never dropped (the vanished post's day is re-folded without it → one amendment)");
+  assert.deepEqual(reset.reports.map((r) => [r.day, r.revision]), [[day(T0 - D), 2]], "…and that is the only report the reset run writes: no re-backfill");
+  assert.equal(reset.state.readsToday, run2.state.readsToday + reset.cost.reads, "…and so do the day counters");
   const { outcome: noReset } = await run(world, reset.state, T1 + 3 * H, { config: config({ resetRequestedAtMillis: T1 + H }) });
   assert.equal(noReset.cost.entriesProcessed, 0, "an already-applied reset stamp does not wipe again");
 
@@ -594,7 +615,7 @@ async function directTests() {
     live: true, expiredAtMillis: null, deletedAtMillis: null, viewCount: 0, viewCountAtMillis: null, lastDecayAt: null, lastOrganic: null, lastSeed: null, lastBoost: null,
     decayAnchorMillis: null, decayOrganicPerDay: null, decaySeedPerDay: null, decayBoostPerDay: null, refreshedAtMillis: null, docRadiusMeters: null, createFetch: null, registeredRun: 1, ...overrides });
   const foldRun = () => ({ knobs: digest.KNOBS, timeZone: TZ, digestVersion: 1, touchedDays: new Set() });
-  const actor = (cls, surface = "feed") => ({ cls, surface, joined: true });
+  const actor = (cls, surface = "feed", uid = null) => ({ cls, surface, joined: true, uid });
   const entry = (row) => digest.parseEntry(row);
   const renderWith = (payload, now, switches = switchesOn, cfg = config()) => {
     const state = { ...digest.initialState(), digestVersion: 1, payload };
@@ -650,10 +671,17 @@ async function directTests() {
     digest.foldEntry(payload, "p", entry({ id: "eng_b", data: { atMillis: at + 1, cause: "engagement", writer: "recordPostEngagement", kind: "like", engagementId: "b", radiusMeters: MAX, organicRadiusMeters: MAX, seedRadiusMeters: 0, boostedRadiusMeters: 0, delta: 0, organicDelta: 3 } }), actor("real"), foldRun());
     const cell = payload.days[day(at)];
     assert.equal(cell.realPostGain.real.clamped, 1); assert.equal(cell.realPostGain.real.n, 1); assert.equal(cell.distinctRealLikers, 0, "a clamped like is not a distinct-liker signal");
+    assert.deepEqual(cell.realActorEntries, {}, "a clamped entry never enters the per-uid map");
+    assert.equal(payload.folds.p.rk.l, 0);
     assert.equal(payload.observed[day(at)].clamped.n, 1); assert.equal(payload.observed[day(at)].like, undefined, "clamped entries never enter M16");
     digest.foldEntry(payload, "p", entry({ id: "eng_c", data: { atMillis: at + 2, cause: "engagement", writer: "recordPostEngagement", kind: "view", engagementId: "c", radiusMeters: MAX - 100, organicRadiusMeters: MAX, seedRadiusMeters: 0, boostedRadiusMeters: 0, delta: -100, organicDelta: 0 } }), actor("real"), foldRun());
     assert.equal(cell.realPostGain.real.resync, 1); assert.equal(cell.realPostGain.real.n, 1, "resync never in n");
     assert.equal(payload.observed[day(at)].resync.n, 1); assert.equal(payload.observed[day(at)].view, undefined, "…nor M16");
+    // Fold addition 2: a partial dislike (organicDelta in (−1,000, 0)) is counted apart from its partial delta.
+    digest.foldEntry(payload, "p", entry({ id: "eng_d", data: { atMillis: at + 3, cause: "engagement", writer: "recordPostEngagement", kind: "dislike", engagementId: "d", radiusMeters: MAX - 400, organicRadiusMeters: MAX - 400, seedRadiusMeters: 0, boostedRadiusMeters: 0, delta: -400, organicDelta: -400 } }), actor("real", "map", TESTER_B), foldRun());
+    assert.equal(cell.realPostGain.real.clampedDislikes, 1); assert.equal(cell.realPostGain.real.clampedDislikeMeters, -400);
+    assert.equal(cell.realPostGain.real.dislike, -400, "gain.dislike still takes the partial delta"); assert.equal(cell.realPostGain.real.clamped, 2); assert.equal(cell.realPostGain.real.n, 2);
+    assert.equal(payload.folds.p.rk.d, 0, "clamped: not a real-actor kind count"); assert.deepEqual(cell.realActorEntries, {});
   }
   // Decay mode inference, direct.
   {
@@ -787,6 +815,10 @@ async function directTests() {
     assert.equal(r3.overflow, true, "and the run says so rather than halting");
     const roundTrip = digest.hydratePayload(JSON.parse(JSON.stringify(digest.compactPayload(build()))));
     assert.deepEqual(roundTrip, build(), "compact → hydrate is lossless");
+    const withPeople = build();
+    digest.foldEntry(withPeople, "post-60", entry({ id: "eng_r", data: { atMillis: T0 - D, cause: "engagement", writer: "recordPostEngagement", kind: "like", engagementId: "r", radiusMeters: 6_000, organicRadiusMeters: 1_000, seedRadiusMeters: 5_000, boostedRadiusMeters: 0, delta: 1_000, organicDelta: 1_000 } }), actor("real", "feed", TESTER_B), foldRun());
+    const peopleTrip = digest.hydratePayload(JSON.parse(JSON.stringify(digest.compactPayload(withPeople))));
+    assert.deepEqual(peopleTrip, withPeople, "…including rk, the per-uid map (inner zeros restored) and the clamp counters");
   }
   // Published 400 KB guard: halve posts → days 14 → drop contamination.posts, trimmed: true.
   {
