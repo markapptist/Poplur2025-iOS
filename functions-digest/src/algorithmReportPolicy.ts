@@ -292,6 +292,50 @@ export function observedBlock(payload: Payload, days: string[]): ObservedBlock {
     clamped: slice.clamped?.n ?? 0, resync: slice.resync?.n ?? 0 };
 }
 
+// ── The feed pool check (§1.5 `feedPool`) ──────────────────────────────────
+
+/** The shared post pool every client reads is a newest-N window: the native relay forwards the newest 96 posts
+ *  (iOS/Android, Poplur2025/PostLoginHomeWebView.swift:3020) and the browser client the newest 160
+ *  (poplur-clay-map/src/nativeFeedPosts.ts LIVE_FEED_POST_LIMIT). Measured 15 Sep 2026: the daily simulation creates
+ *  ≈ 440–460 pops/day, so at 00:20 Toronto the newest-160 window spanned 7.0 h and was 160/160 simulation — a real
+ *  tester's pop leaves every OTHER tester's Feed and Map within hours (own posts survive via the by-uid fold).
+ *  A CHECK: evidence only, never a knob suggestion; the owner decides. */
+export const FEED_POOL_NATIVE = 96;
+export const FEED_POOL_WEB = 160;
+export interface FeedPoolCheck {
+  id: "feedPool"; status: "clear" | "watch"; basis: string; text: string;
+  createdOnDay: number; createdReal: number; createdOfficial: number; createdSynthetic: number; simShare: number | null;
+  perDay7: number; turnoverHoursNative: number | null; turnoverHoursWeb: number | null; poolNative: number; poolWeb: number;
+}
+/** Posts created on D by class — the sweep's `postsCreated`, filed by server createdAt for EVERY swept post — against
+ *  the two pool sizes. `perDay7` is the mean over the 7 days ending D (a missing day cell counts 0); the turnovers are
+ *  hours for `perDay7` creations/day to push a post out of each pool, null when nothing was created in the week.
+ *  `watch` only when the web pool turns over inside a day AND at least half of D's creations were simulation. */
+export function feedPoolCheck(payload: Payload, day: string, d7Days: string[]): FeedPoolCheck {
+  const createdAll = (cell: DayCell | undefined): number => {
+    const counts = cell?.postsCreated;
+    return counts ? counts.real + counts.owner + counts.review + counts.synthetic + counts.official + counts.lab : 0;
+  };
+  const counts = payload.days[day]?.postsCreated ?? emptyDayCell(day).postsCreated;
+  const createdOnDay = createdAll(payload.days[day]);
+  const createdReal = counts.real + counts.owner + counts.review;
+  const createdOfficial = counts.official;
+  const createdSynthetic = counts.synthetic + counts.lab;
+  const simShare = createdOnDay === 0 ? null : createdSynthetic / createdOnDay;
+  const perDay7 = d7Days.reduce((total, d) => total + createdAll(payload.days[d]), 0) / Math.max(1, d7Days.length);
+  const turnoverHoursNative = perDay7 === 0 ? null : round(FEED_POOL_NATIVE / (perDay7 / 24), 1);
+  const turnoverHoursWeb = perDay7 === 0 ? null : round(FEED_POOL_WEB / (perDay7 / 24), 1);
+  const status = turnoverHoursWeb !== null && turnoverHoursWeb < 24 && (simShare ?? 0) >= 0.5 ? "watch" : "clear";
+  const text = createdOnDay === 0 ? `no pops created on ${day}; the pool did not turn over`
+    : `≈ ${fmt(perDay7)} pops/day over the 7 d ending ${day} (${fmt(createdOnDay)} on ${day}: ${fmt(createdSynthetic)} simulation, ${fmt(createdReal)} real, ${fmt(createdOfficial)} official)`
+      + ` — the newest-${FEED_POOL_NATIVE} pool (phone) turns over in ≈ ${fmt(turnoverHoursNative, 1)} h and the newest-${FEED_POOL_WEB} pool (web) in ≈ ${fmt(turnoverHoursWeb, 1)} h;`
+      + " a real pop leaves other testers' Feed and Map after that unless it is their own";
+  return {
+    id: "feedPool", status, basis: "posts created on D by class (sweep on server createdAt) against the shared pool sizes: native relay newest-96 (iOS/Android), browser newest-160", text,
+    createdOnDay, createdReal, createdOfficial, createdSynthetic, simShare, perDay7, turnoverHoursNative, turnoverHoursWeb, poolNative: FEED_POOL_NATIVE, poolWeb: FEED_POOL_WEB,
+  };
+}
+
 // ── The metric table ────────────────────────────────────────────────────────
 
 export interface MetricRow {
@@ -526,6 +570,7 @@ export function renderReport(input: ReportRenderInput): ReportRender {
     { id: "surface", status: surfaceEntries > 0 ? "measured" : "unmeasured", labelledEntries: surfaceEntries, note: surfaceEntries > 0 ? null : "no per-surface figure is claimed" },
     { id: "seedReach", status: trialOnDay ? "hidden" : !seedRest ? "unavailable" : "finding", basis: "proxy: last post location", atClaimShare: extraEvidence.K9![0].value, livePosts: seedRest?.livePosts ?? null,
       pairs: intercept?.opportunity.pairs ?? null, nearMissPairs: intercept?.opportunity.nearMissPairs ?? null, cleanPosts: seedRest?.cleanPosts ?? null, note: flags.backfilled ? "insufficient/backfilled — no snapshot as of this day" : null },
+    feedPoolCheck(payload, day, d7Days),
   ];
 
   // First line and headline (§1.3): the switch is never the evidence.

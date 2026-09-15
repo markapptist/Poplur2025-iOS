@@ -121,6 +121,13 @@ function fixture(options = {}) {
       return api;
     },
     organic: (id) => posts.get(id).organic,
+    /** Posts created on `dayKey` by class, as the new-post sweep files them (`cell.postsCreated`, by server createdAt) —
+     *  the fixture has no reader, so the feedPool check's input is written straight onto the day cell. */
+    created(dayKey, counts) {
+      const cell = payload.days[dayKey] ??= digest.emptyDayCell(dayKey);
+      for (const [cls, n] of Object.entries(counts)) { assert.ok(cls in cell.postsCreated, `postsCreated has no class ${cls}`); cell.postsCreated[cls] += n; }
+      return api;
+    },
     /** Production seen paying the declared grants by synthetic actors on an OFFICIAL post: feeds M16/Gprod/drift
      *  (observe() is class-agnostic) and never a REAL figure (no realPostGain on an official post). */
     pump(o = {}) {
@@ -891,6 +898,78 @@ function staleViewedPosts(f, o = {}) {
     assert.ok(Array.isArray(index.days) && index.days.length === 120 && index.lastReportedDay === "2026-09-12" && index.version === 1);
   }
 
+  // ── Test 26: the feed pool check — the shared newest-N window, evidence only ──
+  {
+    const feedPool = (doc) => doc.checks.find((check) => check.id === "feedPool");
+    const turnover = (pool, perDay) => digest.round(pool / (perDay / 24), 1);
+    // (a) 40 simulation + 2 real on D (lab counts as simulation, review/owner as real), the six days before it at the
+    //     measured ≈ 450/day (one of them with 5 official): the web pool turns over in < 24 h and D is ≥ ½ simulation → watch.
+    const f = grantsWorld();
+    f.created(DAY, { synthetic: 37, lab: 3, real: 1, review: 1 });
+    for (let d = 2; d <= 6; d++) f.created(report.dayPlus(DAY, -d), { synthetic: 450 });
+    f.created(report.dayPlus(DAY, -1), { synthetic: 450, official: 5 });
+    f.created(report.dayPlus(DAY, -7), { synthetic: 1_000 }); // outside the 7 days ending D — never counted
+    const { document: doc } = renderAt(f.payload, DAY);
+    const check = feedPool(doc);
+    assert.equal(doc.checks.length, 7, "the seventh check");
+    assert.equal(doc.checks.indexOf(check), 6, "after seedReach");
+    assert.equal(check.status, "watch");
+    assert.deepEqual({ createdOnDay: check.createdOnDay, createdReal: check.createdReal, createdOfficial: check.createdOfficial, createdSynthetic: check.createdSynthetic, poolNative: check.poolNative, poolWeb: check.poolWeb },
+      { createdOnDay: 42, createdReal: 2, createdOfficial: 0, createdSynthetic: 40, poolNative: 96, poolWeb: 160 });
+    assert.equal(check.simShare, 40 / 42);
+    const perDay7 = (42 + 455 + 5 * 450) / 7;
+    assert.equal(check.perDay7, perDay7, "mean of every class over the 7 days ending D; D−7 is outside");
+    assert.equal(check.turnoverHoursNative, turnover(96, perDay7)); assert.equal(check.turnoverHoursWeb, turnover(160, perDay7));
+    assert.equal(check.turnoverHoursNative, 5.9); assert.equal(check.turnoverHoursWeb, 9.8);
+    assert.equal(check.basis, "posts created on D by class (sweep on server createdAt) against the shared pool sizes: native relay newest-96 (iOS/Android), browser newest-160");
+    assert.equal(check.text, `≈ 392 pops/day over the 7 d ending ${DAY} (42 on ${DAY}: 40 simulation, 2 real, 0 official) — the newest-96 pool (phone) turns over in ≈ 5.9 h and the newest-160 pool (web) in ≈ 9.8 h; a real pop leaves other testers' Feed and Map after that unless it is their own`);
+    assert.ok(!("rows" in check) && !("verify" in check), "a check, never a rule");
+    assert.equal(doc.policy.ruleSetVersion, rules.ruleSetVersion(), "checks are not rules: the rule set did not move");
+    assertNeverSuggest(doc, "feedPool watch");
+    for (const knob of rules.TUNABLE_KNOBS) assert.notEqual(verdictOf(doc, knob).reason, "drift", `${knob}: a feedPool watch pre-empts nothing`);
+    // Nothing on the day cell is read but postsCreated: the check is identical with and without the world's engagement.
+    const bare = fixture(); bare.created(DAY, { synthetic: 37, lab: 3, real: 1, review: 1 }); for (let d = 2; d <= 6; d++) bare.created(report.dayPlus(DAY, -d), { synthetic: 450 }); bare.created(report.dayPlus(DAY, -1), { synthetic: 450, official: 5 });
+    assert.deepEqual(feedPool(renderAt(bare.payload, DAY).document), check);
+    // (b) A quiet day: no creations on D or in the week → clear, the fixed sentence, both turnovers null.
+    const quiet = fixture(); quiet.post("post-quiet", at(9), { owner: "TesterQ" });
+    const q = feedPool(renderAt(quiet.payload, DAY).document);
+    assert.equal(q.status, "clear"); assert.equal(q.text, `no pops created on ${DAY}; the pool did not turn over`);
+    assert.deepEqual({ createdOnDay: q.createdOnDay, createdReal: q.createdReal, createdOfficial: q.createdOfficial, createdSynthetic: q.createdSynthetic, simShare: q.simShare, perDay7: q.perDay7, turnoverHoursNative: q.turnoverHoursNative, turnoverHoursWeb: q.turnoverHoursWeb },
+      { createdOnDay: 0, createdReal: 0, createdOfficial: 0, createdSynthetic: 0, simShare: null, perDay7: 0, turnoverHoursNative: null, turnoverHoursWeb: null });
+    assert.equal(feedPool(renderAt(fixture().payload, DAY).document).text, `no pops created on ${DAY}; the pool did not turn over`, "no day cell at all");
+    // 0 on D but a busy week: the sentence is keyed on D's creations, the turnovers on the week; simShare null → clear.
+    const busyWeek = fixture(); for (let d = 1; d <= 6; d++) busyWeek.created(report.dayPlus(DAY, -d), { synthetic: 700 });
+    const bw = feedPool(renderAt(busyWeek.payload, DAY).document);
+    assert.equal(bw.status, "clear"); assert.equal(bw.text, `no pops created on ${DAY}; the pool did not turn over`);
+    assert.equal(bw.perDay7, 600); assert.equal(bw.turnoverHoursWeb, 6.4); assert.equal(bw.turnoverHoursNative, 3.8); assert.equal(bw.simShare, null);
+    // (c) A real-only day with a fast turnover → clear (simShare 0 < ½); just under half → clear; exactly half → watch.
+    const realOnly = fixture(); realOnly.created(DAY, { real: 30, owner: 10, review: 2 }); for (let d = 1; d <= 6; d++) realOnly.created(report.dayPlus(DAY, -d), { real: 450 });
+    const ro = feedPool(renderAt(realOnly.payload, DAY).document);
+    assert.equal(ro.status, "clear"); assert.equal(ro.simShare, 0); assert.equal(ro.createdReal, 42); assert.equal(ro.createdSynthetic, 0);
+    assert.ok(ro.turnoverHoursWeb < 24, `turnover ${ro.turnoverHoursWeb} h is fast, and still clear`);
+    assert.ok(ro.text.includes(`(42 on ${DAY}: 0 simulation, 42 real, 0 official)`), ro.text);
+    const under = fixture(); under.created(DAY, { synthetic: 20, real: 22 }); for (let d = 1; d <= 6; d++) under.created(report.dayPlus(DAY, -d), { synthetic: 450 });
+    assert.equal(feedPool(renderAt(under.payload, DAY).document).status, "clear"); assert.equal(feedPool(renderAt(under.payload, DAY).document).simShare, 20 / 42);
+    const half = fixture(); half.created(DAY, { synthetic: 21, real: 21 }); for (let d = 1; d <= 6; d++) half.created(report.dayPlus(DAY, -d), { synthetic: 450 });
+    assert.equal(feedPool(renderAt(half.payload, DAY).document).status, "watch"); assert.equal(feedPool(renderAt(half.payload, DAY).document).simShare, 0.5);
+    // A slow week is clear whatever D's mix: 42 on D alone → 6/day → the web pool holds 640 h.
+    const slow = fixture(); slow.created(DAY, { synthetic: 40, real: 2 });
+    const sl = feedPool(renderAt(slow.payload, DAY).document);
+    assert.equal(sl.status, "clear"); assert.equal(sl.perDay7, 6); assert.equal(sl.turnoverHoursWeb, 640); assert.equal(sl.turnoverHoursNative, 384); assert.equal(sl.simShare, 40 / 42);
+    assert.ok(sl.text.startsWith(`≈ 6 pops/day over the 7 d ending ${DAY} (42 on ${DAY}: 40 simulation, 2 real, 0 official) — the newest-96 pool (phone) turns over in ≈ 384.0 h and the newest-160 pool (web) in ≈ 640.0 h;`), sl.text);
+    // (d) Present, with the same numbers, on a backfilled and a catch-up report: it needs no snapshot.
+    for (const flags of [{ partial: false, backfilled: true, catchUp: false }, { partial: false, backfilled: false, catchUp: true }, { partial: true, backfilled: false, catchUp: false }]) {
+      const flagged = renderAt(f.payload, DAY, { flags });
+      assert.deepEqual(feedPool(flagged.document), check, JSON.stringify(flags));
+      if (flags.backfilled) assert.equal(flagged.evidence.snapshots, null, "snapshots are null on a backfilled report and the check is still there");
+    }
+    // The pure helper, direct: a missing day cell counts 0 in the mean; the contract's shape.
+    const direct = report.feedPoolCheck(f.payload, DAY, report.daysEnding(DAY, 7, TZ));
+    assert.deepEqual(direct, check);
+    assert.deepEqual(Object.keys(direct), ["id", "status", "basis", "text", "createdOnDay", "createdReal", "createdOfficial", "createdSynthetic", "simShare", "perDay7", "turnoverHoursNative", "turnoverHoursWeb", "poolNative", "poolWeb"]);
+    assert.equal(report.FEED_POOL_NATIVE, 96); assert.equal(report.FEED_POOL_WEB, 160);
+  }
+
   console.log("algorithm report policy (rules): all assertions passed");
   await runLevelTests();
   console.log("algorithm report policy: all assertions passed");
@@ -1334,5 +1413,50 @@ async function runLevelTests() {
     const published = digest.publishedDay(out.state.payload.days[DAY], null);
     assert.equal(published.realActorEntries, undefined); assert.deepEqual(published.people, { actors: 3, viewers: 1, likers: 1, commenters: 1, maxShare: 0.3333 });
     assert.ok(out.published.days.every((row) => row.realActorEntries === undefined && row.people));
+  }
+
+  // ── Test 27: the feed pool check reads the sweep's postsCreated — synthetic-owned posts through the reader ──
+  {
+    // 40 simulation posts (sim-daily owners, `post-sim-` ids) and 2 more tester posts created on D. The sweep files EVERY
+    // swept post by its creation day (P:1074) whether or not it registers — synthetic posts never do — so the check sees
+    // them with 0 extra reads, on the first deploy's backfilled report.
+    const simPosts = (world, dayStart, n, offset = 0) => { for (let i = 0; i < n; i++) { const t = dayStart + 2 * H + (offset + i) * MIN; addPost(world, `post-sim-${dayStart}-${i}`, SYN[i % SYN.length], t, ledger().create(t).rows, { lat: 43.7 + i * 0.0001 }); } };
+    const world = baseWorld();
+    simPosts(world, T_D, 40);
+    addPost(world, "post-c", TA, T_D + 3 * H, ledger().create(T_D + 3 * H).rows, { lat: 43.68 });
+    addPost(world, "post-d", TB, T_D + 4 * H, ledger().create(T_D + 4 * H).rows, { lat: 43.69 });
+    const out = await run(world, digest.initialState(), T_NEXT + 45 * MIN);
+    const doc = out.reports.find((r) => r.day === DAY).document;
+    assert.equal(doc.backfilled, true, "first deploy: the closed day is backfilled");
+    assert.equal(JSON.parse(doc.evidence).snapshots, null);
+    assert.deepEqual(out.state.payload.days[DAY].postsCreated, { real: 2, owner: 0, review: 0, synthetic: 40, official: 0, lab: 0 });
+    const check = doc.checks.find((c) => c.id === "feedPool");
+    const perDay7 = (42 + 1 + 1) / 7; // post-a (D−3) and post-b (D−5) are inside the week
+    assert.deepEqual(check, report.feedPoolCheck(out.state.payload, DAY, report.daysEnding(DAY, 7, TZ)));
+    assert.deepEqual({ status: check.status, createdOnDay: check.createdOnDay, createdReal: check.createdReal, createdSynthetic: check.createdSynthetic, createdOfficial: check.createdOfficial, simShare: check.simShare, perDay7: check.perDay7 },
+      { status: "clear", createdOnDay: 42, createdReal: 2, createdSynthetic: 40, createdOfficial: 0, simShare: 40 / 42, perDay7 });
+    assert.equal(check.turnoverHoursWeb, digest.round(160 / (perDay7 / 24), 1)); assert.equal(check.turnoverHoursNative, digest.round(96 / (perDay7 / 24), 1));
+    assert.ok(check.turnoverHoursWeb > 24, "a slow week: ≥ ½ simulation on D alone is not a watch");
+    const dm3 = out.reports.find((r) => r.day === report.dayPlus(DAY, -3)).document.checks.find((c) => c.id === "feedPool");
+    assert.equal(dm3.createdOnDay, 1); assert.equal(dm3.createdReal, 1); assert.equal(dm3.createdSynthetic, 0);
+    assert.ok(dm3.text.startsWith(`≈ 0 pops/day over the 7 d ending ${report.dayPlus(DAY, -3)} (1 on ${report.dayPlus(DAY, -3)}: 0 simulation, 1 real, 0 official)`), dm3.text);
+    // The measured shape through the reader: the six days before D at 200 simulation posts each → the web pool turns
+    // over in < 24 h and D is 40/42 simulation → watch; the next run re-renders nothing and the number is stable.
+    const busy = baseWorld();
+    simPosts(busy, T_D, 40);
+    addPost(busy, "post-c", TA, T_D + 3 * H, ledger().create(T_D + 3 * H).rows, { lat: 43.68 });
+    addPost(busy, "post-d", TB, T_D + 4 * H, ledger().create(T_D + 4 * H).rows, { lat: 43.69 });
+    for (let d = 1; d <= 6; d++) simPosts(busy, T_D - d * D, 200);
+    const busyOut = await run(busy, digest.initialState(), T_NEXT + 45 * MIN);
+    assert.equal(busyOut.cost.budgetHit, false);
+    const busyDoc = busyOut.reports.find((r) => r.day === DAY).document;
+    const busyCheck = busyDoc.checks.find((c) => c.id === "feedPool");
+    const busyPerDay7 = (42 + 1 + 1 + 6 * 200) / 7;
+    assert.equal(busyCheck.status, "watch");
+    assert.equal(busyCheck.perDay7, busyPerDay7); assert.equal(busyCheck.turnoverHoursWeb, digest.round(160 / (busyPerDay7 / 24), 1)); assert.equal(busyCheck.turnoverHoursWeb, 21.6); assert.equal(busyCheck.turnoverHoursNative, 13);
+    assert.equal(busyCheck.simShare, 40 / 42);
+    assert.equal(busyCheck.text, `≈ 178 pops/day over the 7 d ending ${DAY} (42 on ${DAY}: 40 simulation, 2 real, 0 official) — the newest-96 pool (phone) turns over in ≈ 13.0 h and the newest-160 pool (web) in ≈ 21.6 h; a real pop leaves other testers' Feed and Map after that unless it is their own`);
+    assert.equal(busyDoc.decision.kind === "verify", false, "a check, never a verify");
+    assert.ok(!JSON.stringify(busyDoc).includes("sim-food"), "no synthetic uid reaches the report");
   }
 }
