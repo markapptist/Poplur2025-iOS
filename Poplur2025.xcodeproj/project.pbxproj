@@ -17,6 +17,7 @@
 		391605F92E3F4A0B000ACB3E /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = 391605F82E3F4A0B000ACB3E /* FirebaseStorage */; };
 		391605FB2E3F4A0B000ACB3E /* FirebaseStorageCombine-Community in Frameworks */ = {isa = PBXBuildFile; productRef = 391605FA2E3F4A0B000ACB3E /* FirebaseStorageCombine-Community */; };
 		391607012E3F4A0B000ACB3E /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 391607002E3F4A0B000ACB3E /* FirebaseMessaging */; };
+		39C7A5010001000100CRASH1 /* FirebaseCrashlytics in Frameworks */ = {isa = PBXBuildFile; productRef = 39C7A5000001000100CRASH0 /* FirebaseCrashlytics */; };
 		B4A1F0012F70000100C0DE01 /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = B4A1F0002F70000100C0DE01 /* FirebaseFunctions */; };
 		B4A1F0032F70000100C0DE01 /* FirebaseAnalyticsCore in Frameworks */ = {isa = PBXBuildFile; productRef = B4A1F0022F70000100C0DE01 /* FirebaseAnalyticsCore */; };
 		B4AU000000000004 /* Poplur2025/auth_transition.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = B4AU000000000002 /* Poplur2025/auth_transition.mp4 */; };
@@ -126,6 +127,7 @@
 				391605F52E3F4A0B000ACB3E /* FirebaseFirestore in Frameworks */,
 				391605EF2E3F4A0B000ACB3E /* FirebaseAuth in Frameworks */,
 				391607012E3F4A0B000ACB3E /* FirebaseMessaging in Frameworks */,
+				39C7A5010001000100CRASH1 /* FirebaseCrashlytics in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -200,6 +202,7 @@
 				391605BD2E3F48FF000ACB3E /* Sources */,
 				391605BE2E3F48FF000ACB3E /* Frameworks */,
 				391605BF2E3F48FF000ACB3E /* Resources */,
+				39C7A5020001000100CRASH2 /* Upload Crashlytics dSYMs */,
 			);
 			buildRules = (
 			);
@@ -214,6 +217,7 @@
 				391605EC2E3F4A0B000ACB3E /* FirebaseAppCheck */,
 				391605EE2E3F4A0B000ACB3E /* FirebaseAuth */,
 				391607002E3F4A0B000ACB3E /* FirebaseMessaging */,
+				39C7A5000001000100CRASH0 /* FirebaseCrashlytics */,
 				391605F02E3F4A0B000ACB3E /* FirebaseCore */,
 				B4A1F0002F70000100C0DE01 /* FirebaseFunctions */,
 				B4A1F0022F70000100C0DE01 /* FirebaseAnalyticsCore */,
@@ -391,6 +395,26 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		39C7A5020001000100CRASH2 /* Upload Crashlytics dSYMs */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Resources/DWARF/${TARGET_NAME}",
+				"$(SRCROOT)/$(BUILT_PRODUCTS_DIR)/$(INFOPLIST_PATH)",
+			);
+			name = "Upload Crashlytics dSYMs";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Symbolicates Crashlytics reports. Deliberately NEVER fails the\n# build: a missing script or a network blip must not block a device\n# push. Without it crashes still arrive, just as raw addresses.\nRUN=\"${BUILD_DIR%%/Build/*}/SourcePackages/checkouts/firebase-ios-sdk/Crashlytics/run\"\nif [ -x \"$RUN\" ]; then\n  \"$RUN\" || echo \"warning: Crashlytics dSYM upload failed; crashes will be unsymbolicated\"\nelse\n  echo \"warning: Crashlytics run script not found at $RUN\"\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		391605BD2E3F48FF000ACB3E /* Sources */ = {
@@ -928,6 +952,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 391605EB2E3F4A0B000ACB3E /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseMessaging;
+		};
+		39C7A5000001000100CRASH0 /* FirebaseCrashlytics */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 391605EB2E3F4A0B000ACB3E /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCrashlytics;
 		};
 		B4A1F0002F70000100C0DE01 /* FirebaseFunctions */ = {
 			isa = XCSwiftPackageProductDependency;
