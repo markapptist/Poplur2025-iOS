@@ -3017,7 +3017,10 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             feedPostsRegistration = Firestore.firestore()
                 .collection("posts")
                 .order(by: "createdAt", descending: true)
-                .limit(to: 96)
+                // Wide enough that the per-population window below can keep the
+                // newest 160 people posts even under ~460 synthetic pops/day
+                // (mirrors LIVE_FEED_FETCH_LIMIT in nativeFeedPosts.ts).
+                .limit(to: Self.feedPoolFetchLimit)
                 .addSnapshotListener { [weak self, weak webView] snapshot, error in
                     // Both weak: the registration is owned by self, and a strong
                     // webView capture here would pin the web view, whose user
@@ -3035,8 +3038,58 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 }
         }
 
+        /// Feed pool sizes, mirrored from nativeFeedPosts.ts
+        /// (LIVE_FEED_FETCH_LIMIT / LIVE_FEED_POST_LIMIT). Keep in step.
+        static let feedPoolFetchLimit = 640
+        static let feedPoolWindow = 160
+
+        /// Whether a post document is simulation output. Mirrors
+        /// isSyntheticPostRow in nativeFeedPosts.ts, itself a mirror of
+        /// functions/src/syntheticIdentity.ts postClass(). Keep the three in step.
+        static func isSyntheticPostDocument(id: String, data: [String: Any]) -> Bool {
+            let owner = (data["userID"] as? String)
+                ?? (data["userId"] as? String)
+                ?? (data["ownerId"] as? String)
+                ?? ""
+            if owner.hasPrefix("synthetic-") || owner.hasPrefix("sim-") { return true }
+            if data["syntheticBeta"] as? Bool == true || data["syntheticCohort"] as? Bool == true { return true }
+            for key in ["syntheticActorId", "syntheticSource", "syntheticJourney"] {
+                if let value = data[key] as? String, !value.isEmpty { return true }
+            }
+            if data["source"] as? String == "synthetic-browser" { return true }
+            return id.hasPrefix("post-sim-") || id.hasPrefix("synthetic-") || id.hasPrefix("post-radius-lab-")
+        }
+
+        /// The newest `feedPoolWindow` of EACH population (people, synthetic),
+        /// own posts always, order preserved. Simulation volume can therefore
+        /// never push a person's post off the phone: people keep exactly the
+        /// window they would have if no synthetic post existed (16 Sep 2026).
+        static func windowByPopulation(_ documents: [QueryDocumentSnapshot], ownUID: String?) -> [QueryDocumentSnapshot] {
+            var kept: [QueryDocumentSnapshot] = []
+            var people = 0
+            var synthetic = 0
+            for document in documents {
+                let data = document.data()
+                let owner = (data["userID"] as? String)
+                    ?? (data["userId"] as? String)
+                    ?? (data["ownerId"] as? String)
+                if let ownUID, owner == ownUID {
+                    kept.append(document)
+                } else if isSyntheticPostDocument(id: document.documentID, data: data) {
+                    if synthetic < feedPoolWindow {
+                        synthetic += 1
+                        kept.append(document)
+                    }
+                } else if people < feedPoolWindow {
+                    people += 1
+                    kept.append(document)
+                }
+            }
+            return kept
+        }
+
         /// Reuse both live snapshots for Feed, Map and Profile requests. Keeping
-        /// this separate from subscription setup avoids a new 96-post read
+        /// this separate from subscription setup avoids a new pool read
         /// whenever one of the account's posts receives an engagement update.
         private func forwardFeedPosts(into webView: WKWebView) {
                     guard !feedApplicationPaused,
@@ -3057,8 +3110,13 @@ struct PostLoginHomeWebView: UIViewRepresentable {
 
                     let seen = Set(latest.map(\.documentID))
                     let documents = latest + self.ownFeedDocuments.filter { !seen.contains($0.documentID) }
-                    let rows: [[String: Any]] = documents
-                        .sorted { createdMillis($0.data()) > createdMillis($1.data()) }
+                    // Two windows, one per population, before the bridge: the
+                    // payload stays ≤ 320 rows + own, and the web's normaliser
+                    // applies the same window idempotently.
+                    let windowed = Self.windowByPopulation(
+                        documents.sorted { createdMillis($0.data()) > createdMillis($1.data()) },
+                        ownUID: self.ownFeedDocumentsUid)
+                    let rows: [[String: Any]] = windowed
                         .compactMap { document in
                             let data = document.data()
                             // playbackURL first, mediaURL as the fallback — by
