@@ -195,7 +195,7 @@ struct Poplur2025App: App {
     @State private var authTransitionToken = 0
     @State private var isWelcomePanelVisible = true
     @State private var showSplash: Bool
-    @State private var authTransitionEarliestFinish = Date.distantPast
+    @State private var authTransitionPlaybackFinished = false
     @Environment(\.scenePhase) private var scenePhase
 
     /// True only while the native signed-out flow is visible —
@@ -414,7 +414,10 @@ struct Poplur2025App: App {
 
                     if showAuthTransition {
                         // The same native video splash covers every auth handoff.
-                        PostLoginLoadingWebView()
+                        PostLoginLoadingWebView {
+                            authTransitionPlaybackFinished = true
+                            finishAuthTransitionIfReady()
+                        }
                             .ignoresSafeArea()
                             .transition(.opacity)
                             .zIndex(100)
@@ -470,21 +473,11 @@ struct Poplur2025App: App {
     private func triggerAuthTransition() {
         authTransitionToken += 1
         let token = authTransitionToken
-        // Physical devices can report the warmed Home document ready before a
-        // delayed cover ever mounts. Present the approved signed-out splash on
-        // the authentication edge itself, then enforce its authored 3.2-second
-        // beat so readiness cannot skip it after a cold or cached launch.
         showAuthTransition = true
         isAuthenticatedHomeReady = false
-        authTransitionEarliestFinish = Date().addingTimeInterval(
-            PoplurPreloginWeb.splashDurationSeconds
-        )
-        // Absolute native escape hatch. Neither the managed JavaScript clock,
-        // WebKit navigation callbacks nor a renderer lease is allowed to own
-        // the lifetime of this cover. A warm-device thermal tripwire can park
-        // all three; without this independent deadline the splash WebView (and
-        // its media process) could remain mounted forever. Home may continue
-        // recovering behind it, but the cover itself is always dismantled.
+        authTransitionPlaybackFinished = false
+        // Bound the Home readiness wait without truncating healthy video.
+        // AVFoundation completion independently owns the intro gate.
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
             guard token == authTransitionToken, auth.isAuthenticated else { return }
             isAuthenticatedHomeReady = true
@@ -499,18 +492,7 @@ struct Poplur2025App: App {
     }
 
     private func finishAuthTransitionIfReady() {
-        guard showAuthTransition, isAuthenticatedHomeReady else { return }
-        let remaining = authTransitionEarliestFinish.timeIntervalSinceNow
-        if remaining > 0 {
-            let token = authTransitionToken
-            DispatchQueue.main.asyncAfter(deadline: .now() + remaining) {
-                guard token == authTransitionToken,
-                      auth.isAuthenticated,
-                      isAuthenticatedHomeReady else { return }
-                finishAuthTransitionIfReady()
-            }
-            return
-        }
+        guard showAuthTransition, isAuthenticatedHomeReady, authTransitionPlaybackFinished else { return }
         withAnimation(.easeInOut(duration: 0.45)) {
             showAuthTransition = false
         }
