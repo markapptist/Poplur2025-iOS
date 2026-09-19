@@ -2096,3 +2096,4 @@ function sendError(res: Response, status: number, code: string, message: string)
 }
 
 export { syntheticDailySimulation } from "./syntheticDailySimulation";
+export { studentDemoOnPost, studentDemoTick, studentDemoOnMessage } from "./studentDemoResponder";

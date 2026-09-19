@@ -41,6 +41,7 @@ const firebase_functions_1 = require("firebase-functions");
 const firestore_1 = require("firebase-functions/v2/firestore");
 const firestore_2 = require("firebase-admin/firestore");
 const syntheticIdentity_1 = require("./syntheticIdentity");
+const studentDemoPolicy_1 = require("./studentDemoPolicy");
 const notificationPrefs_1 = require("./notificationPrefs");
 /**
  * Phase 3 of engagement push notifications: turn a new engagement document into
@@ -142,7 +143,13 @@ exports.notifyOnEngagement = (0, firestore_1.onDocumentCreated)({
     // This also stops the cohort notifying ITSELF: bot-to-bot engagement was
     // writing ~1,300 notification rows every three hours to accounts that hold
     // no device tokens and will never read them.
-    if (!exports.NOTIFY_FOR_SYNTHETIC_ENGAGEMENT && await engagementIsSynthetic(engagement.actorUid)) {
+    // The student demo responder is the one synthetic source that MUST reach
+    // a phone: its reactions exist so a student feels the app answer. Its
+    // engagement ids carry the demo prefix, and its targets are real accounts
+    // by construction (studentDemoResponder.ts), so the hourly simulation's
+    // batch stays as silent as before.
+    const studentDemo = typeof engagement.clientEventId === "string" && engagement.clientEventId.startsWith(studentDemoPolicy_1.STUDENT_DEMO_EVENT_PREFIX);
+    if (!exports.NOTIFY_FOR_SYNTHETIC_ENGAGEMENT && !studentDemo && await engagementIsSynthetic(engagement.actorUid)) {
         firebase_functions_1.logger.debug("synthetic engagement, not notifying", { postId, engagementId, actorUid: engagement.actorUid });
         return;
     }
