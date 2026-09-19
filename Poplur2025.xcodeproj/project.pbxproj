@@ -404,15 +404,20 @@
 			files = (
 			);
 			inputPaths = (
-				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Resources/DWARF/${TARGET_NAME}",
+				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}",
+				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Info.plist",
+				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Resources/DWARF/${PRODUCT_NAME}",
+				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Resources/DWARF/${PRODUCT_NAME}.debug.dylib",
 				"$(BUILT_PRODUCTS_DIR)/$(INFOPLIST_PATH)",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/GoogleService-Info.plist",
+				"$(TARGET_BUILD_DIR)/$(EXECUTABLE_PATH)",
 			);
 			name = "Upload Crashlytics dSYMs";
 			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# Symbolicates Crashlytics reports. Deliberately NEVER fails the\n# build: a missing script or a network blip must not block a device\n# push. Without it crashes still arrive, just as raw addresses.\nRUN=\"${BUILD_DIR%%/Build/*}/SourcePackages/checkouts/firebase-ios-sdk/Crashlytics/run\"\nif [ -x \"$RUN\" ]; then\n  \"$RUN\" || echo \"warning: Crashlytics dSYM upload failed; crashes will be unsymbolicated\"\nelse\n  echo \"warning: Crashlytics run script not found at $RUN\"\nfi\n";
+			shellScript = "# Symbolicates Crashlytics reports. Deliberately NEVER fails the\n# build: a missing script or a network blip must not block a device\n# push. Without it crashes still arrive, just as raw addresses.\n#\n# ENABLE_USER_SCRIPT_SANDBOXING denies every read under SRCROOT and the\n# build dirs except the declared input files, so upload-symbols cannot\n# go looking for GoogleService-Info.plist on its own (\"Could not get\n# GOOGLE_APP_ID in Google Services file from build environment\"). Hand\n# it the copy the Resources phase just put in the bundle, the one plist\n# Debug and Release both ship, which the input paths above declare.\nRUN=\"${BUILD_DIR%%/Build/*}/SourcePackages/checkouts/firebase-ios-sdk/Crashlytics/run\"\nGSP=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/GoogleService-Info.plist\"\nif [ ! -x \"$RUN\" ]; then\n  echo \"warning: Crashlytics run script not found at $RUN\"\nelif [ ! -f \"$GSP\" ]; then\n  echo \"warning: GoogleService-Info.plist not in the bundle at $GSP; crashes will be unsymbolicated\"\nelse\n  \"$RUN\" -gsp \"$GSP\" || echo \"warning: Crashlytics dSYM upload failed; crashes will be unsymbolicated\"\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
