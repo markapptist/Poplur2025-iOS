@@ -20,6 +20,7 @@ final class WatchRadiusSync: NSObject {
     private var authListener: AuthStateDidChangeListenerHandle?
     private var latestSnapshot: WatchRadiusSnapshot?
     private var latestUserID: String?
+    private var accountSnapshotRevision = UUID()
 
     private override init() {
         super.init()
@@ -45,6 +46,7 @@ final class WatchRadiusSync: NSObject {
     /// Reuse the exact live account total forwarded to the reachable web home.
     func publishAccountRadius(radiusMeters: Double, postCount: Int, userID: String) {
         guard userID == Auth.auth().currentUser?.uid, radiusMeters.isFinite else { return }
+        accountSnapshotRevision = UUID()
         send(radiusMeters: radiusMeters, postCount: postCount)
     }
 
@@ -81,9 +83,9 @@ final class WatchRadiusSync: NSObject {
         }
 
         do {
+            let revision = accountSnapshotRevision
             var lastDocument: QueryDocumentSnapshot?
-            var totalRadius = 0.0
-            var postCount = 0
+            var totals = WatchAccountRadiusTotals()
 
             while !Task.isCancelled {
                 var query: Query = db.collection("posts")
@@ -96,8 +98,7 @@ final class WatchRadiusSync: NSObject {
                 let snapshot = try await query.getDocuments()
                 try Task.checkCancellation()
                 for document in snapshot.documents {
-                    totalRadius += WatchRadiusSnapshot.postRadiusMeters(document.data())
-                    postCount += 1
+                    totals.include(document.data())
                 }
 
                 guard snapshot.documents.count == pageSize,
@@ -111,11 +112,14 @@ final class WatchRadiusSync: NSObject {
                 refreshRequested = true
                 return
             }
-            send(radiusMeters: totalRadius, postCount: postCount)
+            // A live post-change snapshot can arrive while these pages load.
+            // Never stamp the older query with a newer time and replace it.
+            guard revision == accountSnapshotRevision else { return }
+            send(radiusMeters: totals.reach, postCount: totals.postCount)
         } catch is CancellationError {
             return
         } catch {
-            print("[WatchRadiusSync] Could not fetch radius: \(error.localizedDescription)")
+            PoplurDiagLog.append("[WatchRadiusSync] fetch FAILED: \(error.localizedDescription)")
         }
     }
 
@@ -182,16 +186,20 @@ final class WatchRadiusSync: NSObject {
         let session = WCSession.default
         guard session.activationState == .activated,
               latestUserID == Auth.auth().currentUser?.uid,
-              let payload = latestSnapshot?.payload else { return }
+              let payload = latestSnapshot?.payload else {
+            PoplurDiagLog.append("[WatchRadiusSync] send skipped: state=\(session.activationState.rawValue) snapshot=\(latestSnapshot != nil) userMatch=\(latestUserID == Auth.auth().currentUser?.uid)")
+            return
+        }
         do {
             try session.updateApplicationContext(payload)
+            PoplurDiagLog.append("[WatchRadiusSync] context sent \(Int(latestSnapshot?.radiusMeters ?? 0)) m / \(latestSnapshot?.postCount ?? 0) posts reachable=\(session.isReachable) watchAppInstalled=\(session.isWatchAppInstalled)")
         } catch {
-            print("[WatchRadiusSync] Could not update watch context: \(error.localizedDescription)")
+            PoplurDiagLog.append("[WatchRadiusSync] context FAILED: \(error.localizedDescription)")
         }
 
         if session.isReachable {
             session.sendMessage(payload, replyHandler: nil) { error in
-                print("[WatchRadiusSync] Could not send live watch message: \(error.localizedDescription)")
+                PoplurDiagLog.append("[WatchRadiusSync] live message FAILED: \(error.localizedDescription)")
             }
         }
     }
@@ -204,6 +212,7 @@ extension WatchRadiusSync: WCSessionDelegate {
         activationDidCompleteWith activationState: WCSessionActivationState,
         error: Error?
     ) {
+        PoplurDiagLog.append("[WatchRadiusSync] activation state=\(activationState.rawValue) paired=\(session.isPaired) watchAppInstalled=\(session.isWatchAppInstalled) reachable=\(session.isReachable) error=\(error?.localizedDescription ?? "none")")
         Task { @MainActor in
             self.sendLatestSnapshot()
             self.refreshAndSendRadius()
@@ -211,19 +220,32 @@ extension WatchRadiusSync: WCSessionDelegate {
     }
 
     nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
+        PoplurDiagLog.append("[WatchRadiusSync] reachability changed reachable=\(session.isReachable) watchAppInstalled=\(session.isWatchAppInstalled)")
         guard session.isReachable else { return }
         Task { @MainActor in self.refreshAndSendRadius() }
+    }
+
+    /// watchOS installs from Xcode/devicectl flip this without a reachability
+    /// change; the context must be re-sent or the new app starts with "—".
+    nonisolated func sessionWatchStateDidChange(_ session: WCSession) {
+        PoplurDiagLog.append("[WatchRadiusSync] watch state changed paired=\(session.isPaired) watchAppInstalled=\(session.isWatchAppInstalled) reachable=\(session.isReachable)")
+        Task { @MainActor in
+            self.sendLatestSnapshot()
+            self.refreshAndSendRadius()
+        }
     }
 
     nonisolated func session(_ session: WCSession, didReceiveMessage message: [String: Any],
                             replyHandler: @escaping ([String: Any]) -> Void) {
         guard message["request"] as? String == "radiusSnapshot" else {
+            PoplurDiagLog.append("[WatchRadiusSync] unknown watch message keys=\(message.keys.sorted())")
             replyHandler(["pending": true])
             return
         }
         Task { @MainActor in
             self.refreshAndSendRadius()
             let snapshot = self.latestUserID == Auth.auth().currentUser?.uid ? self.latestSnapshot : nil
+            PoplurDiagLog.append("[WatchRadiusSync] watch requested snapshot; replying \(snapshot.map { "\(Int($0.radiusMeters)) m / \($0.postCount) posts" } ?? "pending (no snapshot yet)")")
             replyHandler(snapshot?.payload ?? ["pending": true])
         }
     }
