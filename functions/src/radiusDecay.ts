@@ -64,6 +64,14 @@ export async function runRadiusDecay(nowMillis = Date.now(), dueReferences?: adm
         if (dueReferences && (!queue?.exists || (queue.data()?.dueAt?.toMillis?.() ?? 0) > nowMillis)) return;
         if (!snapshot.exists) { if (queue?.exists) transaction.delete(queueRef); return; }
         const post = snapshot.data() ?? {};
+        // The 29 officialContent posts are the map's floor: world-radius ambient
+        // content so a viewer anywhere on Earth sees something on first open. On
+        // 20 Sep 2026 the all-users decay trial (x10, 3 h half-life) zeroed every
+        // one of them at 21:29Z and expired them 'radius-zero', which is why a
+        // phone outside the synthetic cohort's few square kilometres showed a bare
+        // map. The seed layer is not user reach and must not decay; real pops keep
+        // decaying exactly as before.
+        if (post.officialContent === true) { if (queue?.exists) transaction.delete(queueRef); return; }
         // Queue advancement is atomic with the decay/history/account delta.
         // Retries see a future deadline and cannot debit the same hour twice.
         if (dueReferences) {
