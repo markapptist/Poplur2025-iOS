@@ -233,6 +233,13 @@ enum PoplurProfileSelfieStore {
         }
     }
 
+    static func remove() {
+        for ext in ["mp4", "webm", "mov"] {
+            try? FileManager.default.removeItem(at: videoURL(extension: ext))
+        }
+        UserDefaults.standard.removeObject(forKey: extensionKey)
+    }
+
     static func extensionForPersistedVideo() -> String? {
         UserDefaults.standard.string(forKey: extensionKey)
     }
@@ -328,19 +335,8 @@ enum PoplurPermissionRouting {
     static func homePrimerQueryItems() -> [URLQueryItem] {
         var items: [URLQueryItem] = []
 
-        // Location and photos ARE asked by the signed-out pre-login cards, so a
-        // launch that just answered them must not be shown the same two again
-        // while auth hands off to Home.
-        if !preloginHandledThisLaunch {
-            if CLLocationManager().authorizationStatus == .notDetermined,
-               !wasHandled(.location) {
-                items.append(URLQueryItem(name: "askLocation", value: "1"))
-            }
-            if PHPhotoLibrary.authorizationStatus(for: .readWrite) == .notDetermined,
-               !wasHandled(.photos) {
-                items.append(URLQueryItem(name: "askPhotos", value: "1"))
-            }
-        }
+        // System permissions are requested by the feature that needs them.
+        // Never queue imitation permission dialogs on Home or Welcome.
 
         // Notifications are NOT part of the pre-login set, so the handoff guard
         // must not suppress them — doing so meant a user who signed in on this
@@ -363,10 +359,23 @@ enum PoplurPermissionRouting {
         // NOTIFICATIONS tile should raise the clay card or do nothing. Without
         // this the tile could not tell "never asked" from "already answered",
         // and the OS prompt is one-shot — asking twice is not possible.
-        if notificationsUndetermined, !wasHandled(.notifications) {
-            items.append(URLQueryItem(name: "notificationsUndetermined", value: "1"))
-        }
+        // No longer reported to the page. With the flag the NOTIFICATIONS tile
+        // raised a clay card titled 'Allow "Poplur" to send you notifications?'
+        // with Don't Allow / Allow — an imitation of the system alert, which is
+        // what App Review rejected (5.1.1(iv)). The shell now asks with Apple's
+        // own sheet the first time the Notifications page opens; see
+        // requestNotificationsOnFirstVisit().
         return items
+    }
+
+    /// The NOTIFICATIONS page is the contextual moment to ask: the first time it
+    /// opens while authorization is still undetermined, show Apple's one-shot
+    /// sheet directly — no app-drawn prompt in front of it. Driven by the page's
+    /// own `screen_view` for `profile-notifications` (PoplurAnalyticsRelay).
+    static func requestNotificationsOnFirstVisit() {
+        guard notificationsUndetermined, !wasHandled(.notifications) else { return }
+        notificationsUndetermined = false
+        requestNotificationsAfterPrimer()
     }
 
     /// UNUserNotificationCenter only reports status through a callback, but the
@@ -846,6 +855,11 @@ struct PostLoginHomeWebView: UIViewRepresentable {
     }
 
     final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate, CLLocationManagerDelegate {
+        private var profileMediaGeneration = 0
+        private var profileHydrationGeneration = 0
+        private var profileMediaWrites = 0
+        private var removingProfileMedia = false
+
         let bridge = PoplurClayMapView.Coordinator()
         var onReady: () -> Void
         let onWebEvent: ((String, [String: Any]) -> Void)?
@@ -1275,6 +1289,9 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     signalHomeReady()
                     pushAuthToken()
                 }
+                if type == "notificationPop", PoplurNotificationCenter.shared.soundsEnabled {
+                    PoplurSoundPlayer.shared.playPop(minimumInterval: 1)
+                }
                 if type == "phoneRingtone" {
                     let action = body["action"] as? String
                     if action == "start" {
@@ -1473,6 +1490,10 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 // and the session is ended here because the shell owns it:
                 // AuthViewModel's state listener flips isAuthenticated and
                 // Poplur2025App swaps back to the pre-login surface on its own.
+                if type == "deleteAccount" {
+                    Task { @MainActor in PoplurAccountDeletion.shared.present() }
+                    return
+                }
                 if type == "signOut" {
                     PoplurWebCaptureStore.purge()
                     NotificationCenter.default.post(name: .StopMapAudio, object: nil)
@@ -1835,7 +1856,18 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     }
                     return
                 }
-                if PoplurAnalyticsRelay.handles(type) { PoplurAnalyticsRelay.handle(type: type, body: body); return }
+                if PoplurAnalyticsRelay.handles(type) {
+                    // Opening the Notifications page is when iOS itself is asked
+                    // (system sheet, once) — see requestNotificationsOnFirstVisit.
+                    if type == "analyticsEvent",
+                       body["name"] as? String == "screen_view",
+                       let params = body["params"] as? [String: Any],
+                       params["screen_name"] as? String == "profile-notifications" {
+                        PoplurPermissionRouting.requestNotificationsOnFirstVisit()
+                    }
+                    PoplurAnalyticsRelay.handle(type: type, body: body)
+                    return
+                }
                 // Store checkout remains a web-owned bag, but payment and
                 // fulfillment cross this native boundary. StoreKit authorizes
                 // each consumable; the server verifies its signed JWS and
@@ -2099,29 +2131,23 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     return
                 }
                 if type == "requestLocation" {
-                    // Home posts this after its custom clay card's Allow. The
-                    // primer must not raise Apple's system prompt; use an
-                    // already-granted capability if one exists and defer the
-                    // real ask until a location feature is invoked.
-                    PoplurPermissionRouting.markHandled(.location)
-                    let status = locationRequester.authorizationStatus
-                    if status == .authorizedWhenInUse || status == .authorizedAlways {
+                    // An explicit location feature owns the real system request.
+                    switch locationRequester.authorizationStatus {
+                    case .notDetermined:
+                        if !locationPermissionRequestInFlight {
+                            locationPermissionRequestInFlight = true
+                            locationRequester.requestWhenInUseAuthorization()
+                        }
+                    case .authorizedWhenInUse, .authorizedAlways:
                         locationRequester.requestLocation()
-                    } else {
-                        print("[PostLoginHomeWebView] location primer accepted in-app; system prompt deferred (status: \(status.rawValue))")
+                    default:
+                        break // Respect denial; never redirect to Settings automatically.
                     }
+                    return
                 }
                 if type == "requestCameraRoll", let webView = bridge.webView {
-                    // The web roll's primer Allow is not an OS permission ask.
-                    // Show existing authorized photos; the actual Camera Roll
-                    // action owns any later system request.
-                    PoplurPermissionRouting.markHandled(.photos)
-                    let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-                    guard status == .authorized || status == .limited else {
-                        print("[PostLoginHomeWebView] photo primer accepted in-app; system prompt deferred (status: \(status.rawValue))")
-                        return
-                    }
-                    DispatchQueue.main.async { WebCameraRollProvider.pushAuthorized(into: webView) }
+                    DispatchQueue.main.async { WebCameraRollProvider.push(into: webView) }
+                    return
                 }
                 if type == "requestProfileCameraRoll", let webView = bridge.webView {
                     // This comes from an explicit channel-button switch inside
@@ -2322,6 +2348,10 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     PoplurWebCaptureStore.remove(sourceURL.lastPathComponent)
                     return
                 }
+                if type == "removeProfileMedia", let requestId = body["requestId"] as? String,
+                   let webView = bridge.webView {
+                    removeProfileMedia(requestId: requestId, into: webView)
+                }
                 if type == "saveProfileSelfieVideo", let rawVideo = body["video"] as? String {
                     persistProfileSelfieVideo(rawVideo, into: bridge.webView)
                     return
@@ -2387,6 +2417,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     return
                 }
                 if type == "requestProfile", let webView = bridge.webView {
+                    guard !removingProfileMedia, profileMediaWrites == 0 else { return }
                     // The page asking for the profile is the reliable "we are
                     // signed in and the profile matters right now" moment, and
                     // it happens once per launch. Fire-and-forget: the backfill
@@ -2397,6 +2428,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     // leave USERNAME on screen whenever auth or Firestore was
                     // briefly late during the profile tab transition.
                     let authUser = Auth.auth().currentUser
+                    let generation = profileHydrationGeneration
                     var localProfile: [String: Any] = ["business": false]
                     if let fallbackName = Self.authUsername(authUser) {
                         localProfile["username"] = fallbackName
@@ -2409,6 +2441,12 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     if let localSelfie = PoplurProfileSelfieStore.sourceURL() {
                         localProfile["video"] = localSelfie
                     }
+                    if let uid = authUser?.uid,
+                       UserDefaults.standard.bool(forKey: "poplur.profile.mediaRemoved.\(uid)") {
+                        localProfile["photo"] = NSNull()
+                        localProfile["video"] = NSNull()
+                        localProfile["profileMediaRemoved"] = true
+                    }
                     pushProfile(localProfile, into: webView)
 
                     Task {
@@ -2416,7 +2454,9 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                               let snapshot = try? await Firestore.firestore()
                                   .collection("users").document(uid).getDocument(),
                               let data = snapshot.data() else { return }
+                        guard generation == self.profileHydrationGeneration else { return }
                         var profile = localProfile
+                        profile.removeValue(forKey: "profileMediaRemoved")
                         profile["business"] =
                             (data["accountType"] as? String) == PoplurAccountType.business.rawValue
                         profile["privateAccount"] = data["privateAccount"] as? Bool == true
@@ -2456,12 +2496,21 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                         if let remotePhoto {
                             profile["photo"] = remotePhoto
                         }
-                        if profile["video"] == nil,
+                        if !(profile["video"] is String),
                            let remoteSelfie = data["profileSelfieVideoURL"] as? String,
                            !remoteSelfie.isEmpty {
                             profile["video"] = remoteSelfie
                         }
-                        await MainActor.run { self.pushProfile(profile, into: webView) }
+                        if data["profileMediaRemoved"] as? Bool == true {
+                            profile["photo"] = NSNull()
+                            profile["video"] = NSNull()
+                            profile["profileMediaRemoved"] = true
+                            Self.clearLocalProfileMedia(uid: uid)
+                        }
+                        await MainActor.run {
+                            guard generation == self.profileHydrationGeneration else { return }
+                            self.pushProfile(profile, into: webView)
+                        }
                     }
                 }
                 if type == "requestProfilePosts", let webView = bridge.webView {
@@ -2991,18 +3040,19 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                               self.ownFeedDocumentsUid == uid,
                               self.feedSubscriptionsGeneration == generation else { return }
                         self.ownFeedDocuments = snapshot.documents
-                        let totals = snapshot.documents.reduce(into: (earned: 0.0, reach: 0.0)) { totals, document in
-                            let data = document.data()
-                            let reach = WatchRadiusSnapshot.postRadiusMeters(data)
-                            let seed = max(0, (data["seedRadiusMeters"] as? NSNumber)?.doubleValue ?? 0)
-                            let earned = max(0, (data["organicRadiusMeters"] as? NSNumber)?.doubleValue ?? (reach - seed))
-                            totals.earned += min(6_371_000, earned)
-                            totals.reach += min(6_371_000, reach)
+                        // Same three readings as the trigger (functions/src/accountTotalRadius.ts)
+                        // and the web picker (accountRadiusPosts.ts): earned is what other
+                        // people gave a live pop; committed is the claim sitting on it (seed
+                        // above the 5 km grant, never more than its reach); available is
+                        // earned − committed — the composer's ceiling. Earned once, spent once.
+                        let totals = snapshot.documents.reduce(into: WatchAccountRadiusTotals()) { totals, document in
+                            totals.include(document.data())
                         }
                         let payload: [String: Any] = ["uid": uid, "radiusKm": totals.earned / 1000,
-                            "totalReachKm": totals.reach / 1000, "postCount": snapshot.documents.count]
+                            "totalReachKm": totals.reach / 1000, "postCount": totals.postCount,
+                            "availableClaimKm": max(0, totals.earned - totals.committed) / 1000]
                         WatchRadiusSync.shared.publishAccountRadius(radiusMeters: totals.reach,
-                            postCount: snapshot.documents.count, userID: uid)
+                            postCount: totals.postCount, userID: uid)
                         if let encoded = try? JSONSerialization.data(withJSONObject: payload),
                            let json = String(data: encoded, encoding: .utf8) {
                             webView.evaluateJavaScript("window.dispatchEvent(new CustomEvent('poplur-native-account-radius', {detail: \(json)}));true;", completionHandler: nil)
@@ -3632,6 +3682,46 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             }
         }
 
+        private static func clearLocalProfileMedia(uid: String) {
+            try? FileManager.default.removeItem(at: profilePhotoFileURL())
+            try? FileManager.default.removeItem(at: profilePhotoFileURL().deletingLastPathComponent().appendingPathComponent("face_recognition.jpg"))
+            PoplurProfileSelfieStore.remove()
+            UserDefaults.standard.set(true, forKey: "poplur.profile.mediaRemoved.\(uid)")
+            NotificationCenter.default.post(name: Notification.Name("ProfilePhotoUpdated"), object: nil)
+        }
+
+        private func removeProfileMedia(requestId: String, into webView: WKWebView) {
+            guard !removingProfileMedia else { return }
+            profileMediaGeneration += 1
+            profileHydrationGeneration += 1
+            removingProfileMedia = true
+            Task { @MainActor in
+                var ok = false
+                if let uid = Auth.auth().currentUser?.uid {
+                    do {
+                        // One write clears every shipped alias and the video. The tombstone
+                        // prevents legacy local backfill / Auth photos restoring a removal.
+                        try await Firestore.firestore().collection("users").document(uid).setData([
+                            "profilePictureURL": NSNull(), "photoURL": NSNull(),
+                            "avatarUrl": NSNull(), "avatarURL": NSNull(),
+                            "profileSelfieVideoURL": NSNull(), "profileMediaRemoved": true,
+                        ], merge: true)
+                        Self.clearLocalProfileMedia(uid: uid)
+                        self.pushProfile(["photo": NSNull(), "video": NSNull(), "profileMediaRemoved": true], into: webView)
+                        ok = true
+                    } catch {
+                        PoplurDiagLog.append("[PoplurProfile] removal failed: \(error.localizedDescription)")
+                    }
+                }
+                self.removingProfileMedia = false
+                let result: [String: Any] = ["requestId": requestId, "ok": ok]
+                if let bytes = try? JSONSerialization.data(withJSONObject: result),
+                   let json = String(data: bytes, encoding: .utf8) {
+                    webView.evaluateJavaScript("window.dispatchEvent(new CustomEvent('poplur-profile-media-removal',{detail:\(json)}));true;", completionHandler: nil)
+                }
+            }
+        }
+
         private func persistProfilePhoto(_ dataURI: String) {
             guard let comma = dataURI.firstIndex(of: ","),
                   dataURI[..<comma].lowercased().contains("image/jpeg"),
@@ -3644,6 +3734,8 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         }
 
         private func persistProfilePhotoData(_ data: Data) {
+            guard !removingProfileMedia else { return }
+            let generation = profileMediaGeneration
             guard !data.isEmpty,
                   data.count <= 25_000_000,
                   UIImage(data: data) != nil else {
@@ -3659,7 +3751,10 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             }
 
             guard let uid = Auth.auth().currentUser?.uid else { return }
-            Task {
+            profileHydrationGeneration += 1
+            profileMediaWrites += 1
+            Task { @MainActor in
+                defer { self.profileMediaWrites -= 1 }
                 do {
                     let reference = Storage.storage().reference().child("profile_pictures/\(uid).jpg")
                     _ = try await reference.putDataAsync(
@@ -3667,10 +3762,13 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                         metadata: PoplurProfileUpload.imageMetadata()
                     )
                     let downloadURL = try await reference.downloadURL()
+                    guard generation == self.profileMediaGeneration,
+                          Auth.auth().currentUser?.uid == uid else { return }
                     try await Firestore.firestore().collection("users").document(uid).setData(
-                        ["profilePictureURL": downloadURL.absoluteString],
+                        ["profilePictureURL": downloadURL.absoluteString, "profileMediaRemoved": false],
                         merge: true
                     )
+                    UserDefaults.standard.removeObject(forKey: "poplur.profile.mediaRemoved.\(uid)")
                 } catch {
                     PoplurDiagLog.append(
                         "[PoplurProfile] photo cloud sync FAILED: \(error.localizedDescription)"
@@ -3698,13 +3796,18 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             mimeType: String,
             into webView: WKWebView? = nil
         ) {
+            guard !removingProfileMedia else { return }
+            let generation = profileMediaGeneration
             guard let localURL = PoplurProfileSelfieStore.persist(data: data, mimeType: mimeType) else {
                 print("[PostLoginHomeWebView] rejected profile selfie video data")
                 return
             }
             if let webView { pushProfile(["video": localURL], into: webView) }
             guard let uid = Auth.auth().currentUser?.uid else { return }
-            Task {
+            profileHydrationGeneration += 1
+            profileMediaWrites += 1
+            Task { @MainActor in
+                defer { self.profileMediaWrites -= 1 }
                 do {
                     let ext = PoplurProfileSelfieStore.extensionForPersistedVideo() ?? "mp4"
                     let reference = Storage.storage().reference().child("profile_selfies/\(uid).\(ext)")
@@ -3713,10 +3816,13 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                         metadata: PoplurProfileUpload.videoMetadata(forExtension: ext)
                     )
                     let downloadURL = try await reference.downloadURL()
+                    guard generation == self.profileMediaGeneration,
+                          Auth.auth().currentUser?.uid == uid else { return }
                     try await Firestore.firestore().collection("users").document(uid).setData(
-                        ["profileSelfieVideoURL": downloadURL.absoluteString],
+                        ["profileSelfieVideoURL": downloadURL.absoluteString, "profileMediaRemoved": false],
                         merge: true
                     )
+                    UserDefaults.standard.removeObject(forKey: "poplur.profile.mediaRemoved.\(uid)")
                 } catch {
                     PoplurDiagLog.append(
                         "[PoplurProfile] selfie cloud sync FAILED: \(error.localizedDescription)"
@@ -3735,6 +3841,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             into webView: WKWebView,
             captureKey: String
         ) {
+            let generation = profileMediaGeneration
             let asset = AVURLAsset(url: sourceURL)
             guard let exporter = AVAssetExportSession(
                 asset: asset,
@@ -3758,7 +3865,8 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     return
                 }
                 DispatchQueue.main.async {
-                    self?.persistProfileSelfieVideoData(data, mimeType: "video/mp4", into: webView)
+                    guard let self, generation == self.profileMediaGeneration else { return }
+                    self.persistProfileSelfieVideoData(data, mimeType: "video/mp4", into: webView)
                     PoplurWebCaptureStore.remove(captureKey)
                 }
             }

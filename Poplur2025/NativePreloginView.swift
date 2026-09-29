@@ -12,7 +12,6 @@ struct NativePreloginView: View {
     @State private var photoItem: PhotosPickerItem?
     @State private var lastInteraction = Date()
     @State private var awake = true
-    @State private var primer: String?
     @State private var useFaceID = false
     @State private var hueIndex = 0
     @State private var formPosition = ScrollPosition(edge: .top)
@@ -28,8 +27,8 @@ struct NativePreloginView: View {
         GeometryReader { geometry in
             ZStack {
                 NativePreloginBackdrop(color: pinks[hueIndex], awake: motionActive)
-                if model.step == .welcome { welcome(size: geometry.size).accessibilityHidden(primer != nil) }
-                else { form(size: geometry.size).accessibilityHidden(primer != nil) }
+                if model.step == .welcome { welcome(size: geometry.size) }
+                else { form(size: geometry.size) }
                 VStack {
                     HStack {
                         PoplurMuteButton(music: music)
@@ -42,7 +41,6 @@ struct NativePreloginView: View {
                     }.padding(.horizontal, 18).padding(.top, max(geometry.safeAreaInsets.top, windowTopInset) + 10)
                     Spacer()
                 }.ignoresSafeArea(.container)
-                if let primer { permissionCard(primer) }
             }
             .simultaneousGesture(TapGesture().onEnded { wake() })
             .simultaneousGesture(DragGesture(minimumDistance: 4).onChanged { _ in wake() })
@@ -66,14 +64,6 @@ struct NativePreloginView: View {
                 try? await Task.sleep(for: .seconds(1))
                 if Date().timeIntervalSince(lastInteraction) >= 20 { awake = false }
             }
-        }
-        .task {
-            // A primer records the answer; PhotosPicker/Map own the real system
-            // prompt when that feature is used. Declining never blocks sign-in.
-            try? await Task.sleep(for: .seconds(3.5))
-            guard !Task.isCancelled else { return }
-            if !UserDefaults.standard.bool(forKey: "poplur.permissionPrimer.handled.location") { primer = "location" }
-            else if !UserDefaults.standard.bool(forKey: "poplur.permissionPrimer.handled.photos") { primer = "photos" }
         }
         .alert("Poplur", isPresented: Binding(get: { model.notice != nil }, set: { if !$0 { model.notice = nil } })) { Button("OK") { model.notice = nil } } message: { Text(model.notice ?? "") }
     }
@@ -220,24 +210,6 @@ struct NativePreloginView: View {
     }
     private var introLines: [String] {
         model.accountType == .business ? ["Your radius is anchored to your address, not your phone — it stays where your door is.", "Your doorstep stays covered even on a quiet week, so people outside can always find you.", "Reach locals actually within range, and post offers and bookings straight from your spot.", "You see who you reached as numbers, never as individuals."] : ["Your radius follows you. Everything you post radiates out from wherever you were standing.", "Radius decays. Keep posting and it grows; go quiet and it shrinks back.", "Take over ground on the map, one pop at a time — the goal is a radius the size of the world.", "You are discovered by interception: people inside your circle see you, and you see theirs."]
-    }
-    private func permissionCard(_ kind: String) -> some View {
-        ZStack {
-            Color.black.opacity(0.25).ignoresSafeArea()
-            VStack(spacing: 18) {
-                Image(systemName: kind == "location" ? "location.fill" : "photo.on.rectangle.angled").font(.system(size: 40)).foregroundStyle(.pink)
-                Text(kind == "location" ? "Allow “Poplur” to use your location?" : "Allow “Poplur” to access your camera roll?").font(.custom("AvenirNext-Heavy", size: 20)).multilineTextAlignment(.center)
-                Text(kind == "location" ? "Your location powers nearby posts, map positioning, and the radius around you." : "Share your favourite moments with people inside your radius.").font(.system(size: 14, weight: .semibold)).multilineTextAlignment(.center)
-                if kind == "location" { Button("Allow Once") { answerPrimer(kind) }; Button("Allow While Using App") { answerPrimer(kind) } }
-                else { Button("Allow") { answerPrimer(kind) } }
-                Button("Don’t Allow") { answerPrimer(kind) }
-            }.font(.system(size: 17, weight: .heavy)).tint(.pink).foregroundStyle(Color(red: 0.25, green: 0.04, blue: 0.16)).padding(24).frame(maxWidth: 310).background(cream, in: RoundedRectangle(cornerRadius: 28)).overlay(RoundedRectangle(cornerRadius: 28).stroke(.white, lineWidth: 2)).shadow(radius: 20).accessibilityElement(children: .contain)
-        }.accessibilityIdentifier("preloginPermission")
-    }
-    private func answerPrimer(_ kind: String) {
-        PoplurPermissionRouting.markPreloginHandledThisLaunch(permission: kind == "location" ? .location : .photos)
-        primer = kind == "location" && !UserDefaults.standard.bool(forKey: "poplur.permissionPrimer.handled.photos") ? "photos" : nil
-        wake()
     }
     private func biometricSignIn() async {
         guard !model.busy else { return }

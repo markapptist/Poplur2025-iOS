@@ -911,6 +911,7 @@ final class PostUploadService {
         let database = Firestore.firestore()
         let postRef = database.collection("posts").document(postID)
         let accountRef = database.collection("users").document(uid)
+        let admissionRef = database.collection("postAdmissions").document(uid)
         let proposedPost = post
         // Read the allowance inside the same transaction as publication: decay
         // can lower it while a draft is open, even after the picker was correct.
@@ -928,9 +929,18 @@ final class PostUploadService {
                     return nil
                 }
                 let freshAccount = try transaction.getDocument(accountRef).data() ?? [:]
-                let earned = max(0, (freshAccount["claimRadiusMeters"] as? NSNumber)?.intValue ?? 0)
-                let total = (freshAccount["totalPostRadiusMeters"] as? NSNumber)?.intValue
-                let allowed = min(6_371_000, total.map { max(5_000, $0) } ?? (earned + 5_000))
+                // Server rules require this slot and the post in ONE commit.
+                // Read before any writes so concurrent publishes retry against
+                // the winner's slot. An existing post returned above costs none.
+                let admission = try transaction.getDocument(admissionRef).data()
+                let syntheticActor = uid.hasPrefix("sim-") || uid.hasPrefix("synthetic-")
+                let nextAdmission = syntheticActor ? nil : try Self.postAdmissionData(
+                    previous: admission, account: freshAccount, postID: postID)
+                // Match the already-deployed seed rule when refreshing a
+                // draft. The profile's displayed total is not an allowance.
+                let earned = max(0, (freshAccount["earnedClaimMeters"] as? NSNumber)?.intValue ?? 0)
+                let committed = max(0, (freshAccount["committedClaimMeters"] as? NSNumber)?.intValue ?? 0)
+                let allowed = min(6_371_000, max(0, earned - committed) + 5_000)
                 let seed = min(max(0, radiusMeters), allowed)
                 var finalPost = proposedPost
                 finalPost["radius"] = seed
@@ -940,6 +950,7 @@ final class PostUploadService {
                     for key in ["latitude", "longitude", "latitudeCell", "longitudeCell"] { finalPost.removeValue(forKey: key) }
                 }
                 transaction.setData(finalPost, forDocument: postRef)
+                if let nextAdmission { transaction.setData(nextAdmission, forDocument: admissionRef) }
                 transaction.setData([
                     "latitude": coordinate.latitude,
                     "longitude": coordinate.longitude,
@@ -952,6 +963,37 @@ final class PostUploadService {
                 return nil
             }
         }
+    }
+
+    /// The phone proposes the transition for friendly errors; Firestore rules
+    /// independently enforce its exact count and server timestamps at commit.
+    static func postAdmissionData(previous: [String: Any]?, account: [String: Any], postID: String) throws -> [String: Any] {
+        let now = Date().timeIntervalSince1970 * 1_000
+        let last = (previous?["lastPostAt"] as? Timestamp).map { $0.dateValue().timeIntervalSince1970 * 1_000 }
+            ?? (account["lastPostAtMillis"] as? NSNumber)?.doubleValue ?? 0
+        let start = (previous?["windowStartedAt"] as? Timestamp)
+            ?? (account["postWindowStartMillis"] as? NSNumber).map {
+                // Preserve exact milliseconds when migrating the legacy
+                // counter; Double/Date rounding can lose a millisecond.
+                let millis = max(0, $0.int64Value)
+                return Timestamp(seconds: millis / 1_000, nanoseconds: Int32((millis % 1_000) * 1_000_000))
+            }
+        let count = max(0, ((previous ?? account)["postsInWindow"] as? NSNumber)?.intValue ?? 0)
+        let active = start.map { $0.dateValue().timeIntervalSince1970 > 0 && now - $0.dateValue().timeIntervalSince1970 * 1_000 < 86_400_000 } ?? false
+        if last > 0 && now - last < 60_000 {
+            throw NSError(domain: "PostUploadService", code: 7,
+                userInfo: [NSLocalizedDescriptionKey: "Wait a minute between posts. Your draft is saved."])
+        }
+        if active && count >= 30 {
+            throw NSError(domain: "PostUploadService", code: 8,
+                userInfo: [NSLocalizedDescriptionKey: "You've reached 30 posts in this 24-hour window. Your draft is saved."])
+        }
+        return [
+            "postId": postID,
+            "lastPostAt": FieldValue.serverTimestamp(),
+            "windowStartedAt": active ? start! as Any : FieldValue.serverTimestamp(),
+            "postsInWindow": active ? count + 1 : 1
+        ]
     }
 
     static func applyAIMetadata(_ usedAI: Bool, to post: inout [String: Any]) {

@@ -99,7 +99,7 @@
     box-shadow: inset 0 0 70px rgba(120, 0, 60, 0.4), inset 0 2px 0 rgba(255, 255, 255, 0.22);
   }
   .worldDots { position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 100%; opacity: 0.34; }
-  .worldMapMotion { position: absolute; inset: 0; z-index: 2; width: 100%; height: 100%; pointer-events: none; mix-blend-mode: screen; }
+  .worldMapMotion { position: absolute; inset: 0; z-index: 2; width: 100%; height: 100%; pointer-events: none; mix-blend-mode: normal; }
   .confetti { position: absolute; inset: 0; z-index: 4; overflow: hidden; pointer-events: none; }
   /* Mute toggle: bare glyph in the top-left safe area — no pill, no background */
   /* The insets are why this needs viewport-fit=cover above. On a phone the page
@@ -1820,7 +1820,28 @@
       document.getElementById('paneProfilePhoto'), document.getElementById('paneAccountIntro'),
       document.getElementById('paneGender') ]
     var paneIndex = 0
+    var __prewarmed = null
+    // Put a pre-attached pane back in its exact slot, without a transition,
+    // and hand the transition property back to the stylesheet.
+    function restorePrewarmed() {
+      if (!__prewarmed) return
+      var __pw = __prewarmed
+      __prewarmed = null
+      __pw.pane.style.transition = 'none'
+      __pw.pane.style.transform = 'translateX(' + (__pw.i - paneIndex) * 100 + '%)'
+      void __pw.pane.offsetWidth
+      __pw.pane.style.transition = ''
+    }
+    function prewarmPane(i) {
+      if (i == null || isNaN(i) || i === paneIndex || !panes[i]) return
+      if (__prewarmed && __prewarmed.pane !== panes[i]) restorePrewarmed()
+      var pane = panes[i]
+      pane.style.transition = 'none'
+      pane.style.transform = i > paneIndex ? 'translateX(calc(100% - 1px))' : 'translateX(calc(-100% + 1px))'
+      __prewarmed = { pane: pane, i: i }
+    }
     function setPane(index) {
+      restorePrewarmed()
       paneIndex = index
       panes.forEach(function (pane, i) {
         pane.style.transform = 'translateX(' + (i - index) * 100 + '%)'
@@ -1849,6 +1870,20 @@
     setPane(0)
     document.getElementById('btnSignIn').addEventListener('click', function () { setPane(1) })
     document.getElementById('btnSignUp').addEventListener('click', function () { setPane(2) })
+    // Pre-attach the incoming pane's compositor backing during the press (9d).
+    document.getElementById('btnSignIn').addEventListener('pointerdown', function () { prewarmPane(1) }, { passive: true })
+    document.getElementById('btnSignUp').addEventListener('pointerdown', function () { prewarmPane(2) }, { passive: true })
+    var __introNext = document.getElementById('introNext')
+    if (__introNext) __introNext.addEventListener('pointerdown', function () { prewarmPane(3) }, { passive: true })
+    panes.forEach(function (pane) {
+      pane.querySelectorAll('[data-goto]').forEach(function (b) {
+        b.addEventListener('pointerdown', function () { prewarmPane(Number(b.dataset.goto)) }, { passive: true })
+      })
+    })
+    var __cubeStage = document.getElementById('lcubeStage')
+    if (__cubeStage) __cubeStage.addEventListener('pointerdown', function () {
+      if (paneIndex > 0) prewarmPane(BACK_FROM[paneIndex] != null ? BACK_FROM[paneIndex] : 0)
+    }, { passive: true })
     panes.forEach(function (pane) {
       pane.querySelectorAll('[data-goto]').forEach(function (link) {
         link.addEventListener('click', function () { setPane(Number(link.dataset.goto)) })
@@ -1886,12 +1921,28 @@
     // Create login. Every step is a native pane matching the initial page. ──
     function isBusiness() { return document.querySelector('.acctB').classList.contains('on') }
     function finishSignup(message) {
-      cubeSuccess()
-      if (window.__poplurShowAlert) window.__poplurShowAlert(message, 'Nice!')
-      // Ask for the cube's gender before the post-login handoff, same
-      // placement as the reviewed prototype: right after a successful
-      // sign-in/sign-up, before the app itself opens.
-      setTimeout(function () { setPane(9) }, 1400)
+      var acctType = isBusiness() ? 'business' : 'personal'
+      var suEmail = '', suPass = ''
+      try {
+        var __em = document.querySelector('#paneCreateLogin input[type="email"]')
+        var __pw = document.querySelectorAll('#paneCreateLogin input[type="password"]')
+        suEmail = __em ? __em.value.trim() : ''
+        suPass = (__pw && __pw[0]) ? __pw[0].value : ''
+      } catch (e) {}
+      var __posted = window.poplurBridge && poplurBridge.signUp({ email: suEmail, password: suPass, accountType: acctType, profilePhotoDataURI: acctType === 'personal' ? pendingProfilePhotoDataURI : '' })
+      if (!__posted) {
+        cubeSuccess()
+        if (window.__poplurShowAlert) window.__poplurShowAlert(message, 'Nice!')
+        setTimeout(function () { setPane(9) }, 1400)
+      }
+    }
+    // Native -> web auth result: real Firebase sign-in/up outcome.
+    // Success -> brief gesture (the native app is already transitioning);
+    // failure -> the approved error banner + cube shake. In-scope so it can
+    // reach cubeSuccess()/signupError().
+    window.poplurAuthResult = function (res) {
+      if (res && res.ok) { cubeSuccess() }
+      else { signupError((res && res.error) || 'Something went wrong. Please try again.') }
     }
     // Date of birth — the YEAR list is generated at runtime and spans the
     // full range rather than being trimmed to 13+-eligible years, so a

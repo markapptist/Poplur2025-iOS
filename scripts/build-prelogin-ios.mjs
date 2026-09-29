@@ -303,22 +303,35 @@ const POPLUR_WEBGL_OK = (function () {
   let stableViewportWidth = innerWidth`
   );
 
+  // Every auth transform below MUST match the current Good Copy source. A silent
+  // non-match ships a prototype stub: on 22 Sep 2026 the source's finishSignup
+  // gained the gender pane, 9c stopped matching, and the app's Sign Up showed
+  // "Account created" without ever creating an account (App Review blocker).
+  const mustReplace = (html, target, replacement, label) => {
+    if (!html.includes(target)) {
+      throw new Error(`${label}: Good Copy source text changed; update this bounded iOS bridge transform.`);
+    }
+    return html.replace(target, replacement);
+  };
+
   // 9a. Sign-in (password) → post {email, password} to REAL native Firebase auth.
   //     Do NOT fake success: on a native host the auth-state listener transitions
   //     the app on success and window.poplurAuthResult surfaces errors. Only in a
   //     plain-browser preview (no native host, post() returns falsy) do we keep
   //     the prototype success gesture.
-  out = out.replace(
+  out = mustReplace(out,
     "      if (/.+@.+\\..+/.test(email) && pass.length >= 4) cubeSuccess()",
-    "      if (/.+@.+\\..+/.test(email) && pass.length >= 4) { var __p = window.poplurBridge && poplurBridge.signIn({ email: email, password: pass, method: 'password' }); if (!__p) cubeSuccess() }"
+    "      if (/.+@.+\\..+/.test(email) && pass.length >= 4) { var __p = window.poplurBridge && poplurBridge.signIn({ email: email, password: pass, method: 'password' }); if (!__p) cubeSuccess() }",
+    "9a sign-in"
   );
 
   // 9b. Face ID sign-in → post {method:'faceid'} (native replies via
   //     poplurAuthResult that it isn't wired yet — no faked success). Browser
   //     preview keeps the prototype gesture.
-  out = out.replace(
+  out = mustReplace(out,
     "    document.getElementById('faceIdBtn').addEventListener('click', cubeSuccess)",
-    "    document.getElementById('faceIdBtn').addEventListener('click', function () { var __p = window.poplurBridge && poplurBridge.signIn({ method: 'faceid' }); if (!__p) cubeSuccess() })"
+    "    document.getElementById('faceIdBtn').addEventListener('click', function () { var __p = window.poplurBridge && poplurBridge.signIn({ method: 'faceid' }); if (!__p) cubeSuccess() })",
+    "9b Face ID"
   );
 
   // 9c. Sign-up completion → post {email, password, accountType} to REAL native
@@ -326,9 +339,10 @@ const POPLUR_WEBGL_OK = (function () {
   //     which stays in the DOM). No faked success on a native host: success
   //     transitions via the auth-state listener, errors arrive via
   //     window.poplurAuthResult. Browser preview (no native host) keeps the
-  //     approved prototype choreography. Also defines poplurAuthResult in-scope.
-  out = out.replace(
-    "    function finishSignup(message) {\n      cubeSuccess()\n      if (window.__poplurShowAlert) window.__poplurShowAlert(message, 'Nice!')\n      setTimeout(function () { setPane(0) }, 1400)\n    }",
+  //     approved prototype choreography (gender pane next). Also defines
+  //     poplurAuthResult in-scope.
+  out = mustReplace(out,
+    "    function finishSignup(message) {\n      cubeSuccess()\n      if (window.__poplurShowAlert) window.__poplurShowAlert(message, 'Nice!')\n      // Ask for the cube's gender before the post-login handoff, same\n      // placement as the reviewed prototype: right after a successful\n      // sign-in/sign-up, before the app itself opens.\n      setTimeout(function () { setPane(9) }, 1400)\n    }",
     "    function finishSignup(message) {\n" +
     "      var acctType = isBusiness() ? 'business' : 'personal'\n" +
     "      var suEmail = '', suPass = ''\n" +
@@ -342,7 +356,7 @@ const POPLUR_WEBGL_OK = (function () {
     "      if (!__posted) {\n" +
     "        cubeSuccess()\n" +
     "        if (window.__poplurShowAlert) window.__poplurShowAlert(message, 'Nice!')\n" +
-    "        setTimeout(function () { setPane(0) }, 1400)\n" +
+    "        setTimeout(function () { setPane(9) }, 1400)\n" +
     "      }\n" +
     "    }\n" +
     "    // Native -> web auth result: real Firebase sign-in/up outcome.\n" +
@@ -352,7 +366,89 @@ const POPLUR_WEBGL_OK = (function () {
     "    window.poplurAuthResult = function (res) {\n" +
     "      if (res && res.ok) { cubeSuccess() }\n" +
     "      else { signupError((res && res.error) || 'Something went wrong. Please try again.') }\n" +
-    "    }"
+    "    }",
+    "9c sign-up"
+  );
+
+  // 9d. Pane-slide hitch on iPhone (owner report 24 Sep 2026: "lag after pressing
+  //     a button and transitioning to the next area", "even when going back").
+  //     Every .pane is a permanent composited layer (inset: 0 + will-change:
+  //     transform) parked outside the .phone clip, so WebKit keeps its backing
+  //     DETACHED; the tap's first rendering update then has to paint the whole
+  //     1179x2556 pane at 3x in the same commit that starts the 0.55 s slide.
+  //     Fix: on the finger PRESS, nudge the incoming pane 1 px into the clip
+  //     (invisible — the pane paints nothing in its first pixel) so WebKit
+  //     attaches and paints it during the press; at the top of setPane put it
+  //     back in its exact slot without a transition, flush, then let the
+  //     approved slide run from the same distance as before. No visible change.
+  out = mustReplace(out,
+    "    function setPane(index) {\n      paneIndex = index\n      panes.forEach(function (pane, i) {\n        pane.style.transform = 'translateX(' + (i - index) * 100 + '%)'\n      })",
+    "    var __prewarmed = null\n" +
+    "    // Put a pre-attached pane back in its exact slot, without a transition,\n" +
+    "    // and hand the transition property back to the stylesheet.\n" +
+    "    function restorePrewarmed() {\n" +
+    "      if (!__prewarmed) return\n" +
+    "      var __pw = __prewarmed\n" +
+    "      __prewarmed = null\n" +
+    "      __pw.pane.style.transition = 'none'\n" +
+    "      __pw.pane.style.transform = 'translateX(' + (__pw.i - paneIndex) * 100 + '%)'\n" +
+    "      void __pw.pane.offsetWidth\n" +
+    "      __pw.pane.style.transition = ''\n" +
+    "    }\n" +
+    "    function prewarmPane(i) {\n" +
+    "      if (i == null || isNaN(i) || i === paneIndex || !panes[i]) return\n" +
+    "      if (__prewarmed && __prewarmed.pane !== panes[i]) restorePrewarmed()\n" +
+    "      var pane = panes[i]\n" +
+    "      pane.style.transition = 'none'\n" +
+    "      pane.style.transform = i > paneIndex ? 'translateX(calc(100% - 1px))' : 'translateX(calc(-100% + 1px))'\n" +
+    "      __prewarmed = { pane: pane, i: i }\n" +
+    "    }\n" +
+    "    function setPane(index) {\n" +
+    "      restorePrewarmed()\n" +
+    "      paneIndex = index\n" +
+    "      panes.forEach(function (pane, i) {\n" +
+    "        pane.style.transform = 'translateX(' + (i - index) * 100 + '%)'\n" +
+    "      })",
+    "9d setPane pre-attach"
+  );
+  out = mustReplace(out,
+    "    document.getElementById('btnSignIn').addEventListener('click', function () { setPane(1) })\n    document.getElementById('btnSignUp').addEventListener('click', function () { setPane(2) })",
+    "    document.getElementById('btnSignIn').addEventListener('click', function () { setPane(1) })\n" +
+    "    document.getElementById('btnSignUp').addEventListener('click', function () { setPane(2) })\n" +
+    "    // Pre-attach the incoming pane's compositor backing during the press (9d).\n" +
+    "    document.getElementById('btnSignIn').addEventListener('pointerdown', function () { prewarmPane(1) }, { passive: true })\n" +
+    "    document.getElementById('btnSignUp').addEventListener('pointerdown', function () { prewarmPane(2) }, { passive: true })\n" +
+    "    var __introNext = document.getElementById('introNext')\n" +
+    "    if (__introNext) __introNext.addEventListener('pointerdown', function () { prewarmPane(3) }, { passive: true })\n" +
+    "    panes.forEach(function (pane) {\n" +
+    "      pane.querySelectorAll('[data-goto]').forEach(function (b) {\n" +
+    "        b.addEventListener('pointerdown', function () { prewarmPane(Number(b.dataset.goto)) }, { passive: true })\n" +
+    "      })\n" +
+    "    })\n" +
+    "    var __cubeStage = document.getElementById('lcubeStage')\n" +
+    "    if (__cubeStage) __cubeStage.addEventListener('pointerdown', function () {\n" +
+    "      if (paneIndex > 0) prewarmPane(BACK_FROM[paneIndex] != null ? BACK_FROM[paneIndex] : 0)\n" +
+    "    }, { passive: true })",
+    "9d pre-attach wiring"
+  );
+
+  // 9e. The clay-stud canvas blends with `mix-blend-mode: screen`. On the phone
+  //     that is a no-op: .phone is a stacking context (container-type: size),
+  //     its background is transparent and .worldDots is hidden, so the canvas
+  //     blends over nothing — but Core Animation still renders the whole
+  //     .phone group offscreen every frame to do it. Drop it, pixel-identical,
+  //     guarded so the build fails if the isolation it relies on ever changes.
+  for (const required of [
+    "container-type: size;",
+    ".phone { border-radius: 0 !important; box-shadow: none !important; background: transparent !important; }",
+    ".worldDots { display: none !important; }",
+  ]) {
+    if (!out.includes(required)) throw new Error(`9e mix-blend guard: '${required}' missing; keep mix-blend-mode: screen.`);
+  }
+  out = mustReplace(out,
+    ".worldMapMotion { position: absolute; inset: 0; z-index: 2; width: 100%; height: 100%; pointer-events: none; mix-blend-mode: screen; }",
+    ".worldMapMotion { position: absolute; inset: 0; z-index: 2; width: 100%; height: 100%; pointer-events: none; mix-blend-mode: normal; }",
+    "9e worldMapMotion blend"
   );
 
   // 9c-1. The approved personal sign-up screen only previews its selected

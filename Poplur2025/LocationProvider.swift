@@ -35,8 +35,7 @@ final class LocationProvider: NSObject, ObservableObject {
         // one adequate fix (or eight seconds), then turns the radio off.
         manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
         manager.distanceFilter = 50
-        // A yes on the web's clay location card is the ONE thing allowed to
-        // raise the real iOS dialog. See requestIfAlreadyAuthorized().
+        // Keep passive map reads separate from explicit system permission requests.
         let center = NotificationCenter.default
         observerTokens.append(center.addObserver(
             forName: Notification.Name("PoplurPermissionHandled"),
@@ -83,18 +82,8 @@ final class LocationProvider: NSObject, ObservableObject {
         camera.wrappedValue = .camera(MapCamera(centerCoordinate: coord, distance: 300, heading: 0, pitch: 60))
     }
 
-    /// Start location WITHOUT ever showing the system dialog.
-    ///
-    /// The map used to call `request()` the moment the tab loaded, which fired
-    /// `requestWhenInUseAuthorization()` directly — so the bare iOS alert landed
-    /// over the map and the app's own clay primer never got to go first. That
-    /// ordering is the whole point of the primer: the system prompt is one-shot
-    /// per install, so a reflexive "Don't Allow" on a bare alert costs the
-    /// permission permanently, while declining the clay card costs nothing.
-    ///
-    /// Anything that merely WANTS location (map load, a passive fix) calls this.
-    /// Only an explicit yes on the primer — or a user action that is itself the
-    /// ask — is allowed to call `request()`.
+    /// Passive map loads only consume authorization already granted by iOS.
+    /// An explicit location action may call request() to show the system prompt.
     func requestIfAlreadyAuthorized() {
         switch manager.authorizationStatus {
         case .authorizedWhenInUse, .authorizedAlways:

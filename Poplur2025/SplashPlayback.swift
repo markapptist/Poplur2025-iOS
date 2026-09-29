@@ -15,9 +15,15 @@ final class SplashPlayback: ObservableObject {
     private var stallTimer: Timer?
     private var lastAdvance = ProcessInfo.processInfo.systemUptime
     private var active = false
+    private var attemptedRecovery = false
+    private let recoveryDelay: TimeInterval
+    private let stallLimit: TimeInterval
 
-    init(url: URL? = Bundle.main.url(forResource: "poplur_splash", withExtension: "mp4")) {
+    init(url: URL? = Bundle.main.url(forResource: "poplur_splash", withExtension: "mp4"), recoveryDelay: TimeInterval = 1.5, stallLimit: TimeInterval = 5) {
+        self.recoveryDelay = recoveryDelay
+        self.stallLimit = stallLimit
         player.isMuted = true
+        player.automaticallyWaitsToMinimizeStalling = false // The clip is bundled, not streamed.
         player.actionAtItemEnd = .pause
         guard let url else { hasFinished = true; return }
         let item = AVPlayerItem(url: url)
@@ -31,13 +37,14 @@ final class SplashPlayback: ObservableObject {
                 Task { @MainActor [weak self] in self?.finish() }
             })
         }
-        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1 / 24, preferredTimescale: 600), queue: .main) { [weak self] time in
+        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1 / 12, preferredTimescale: 600), queue: .main) { [weak self] time in
             Task { @MainActor [weak self] in
                 guard let self, !self.hasFinished else { return }
                 let seconds = time.seconds
                 if seconds.isFinite, seconds > self.elapsed {
                     self.elapsed = seconds
                     self.lastAdvance = ProcessInfo.processInfo.systemUptime
+                    self.attemptedRecovery = false
                 }
                 let duration = self.player.currentItem?.duration.seconds ?? 0
                 if seconds.isFinite, duration.isFinite, duration > 0 { self.progress = min(1, max(0, seconds / duration)) }
@@ -52,15 +59,24 @@ final class SplashPlayback: ObservableObject {
         stallTimer = nil
         if value {
             lastAdvance = ProcessInfo.processInfo.systemUptime
-            player.play()
-            // Only an actual decoder stall may bypass completion. Background time
-            // does not count, and healthy playback has no wall-clock deadline.
-            stallTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            attemptedRecovery = false
+            player.playImmediately(atRate: 1)
+            // An audio-session change while Home starts can pause a muted player
+            // without an AVPlayerItem failure. Resume once before falling through.
+            // Healthy playback still finishes at its actual final frame.
+            let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
                 Task { @MainActor [weak self] in
                     guard let self, self.active, !self.hasFinished else { return }
-                    if ProcessInfo.processInfo.systemUptime - self.lastAdvance >= 10 { self.finish() }
+                    let stalledFor = ProcessInfo.processInfo.systemUptime - self.lastAdvance
+                    if stalledFor >= self.stallLimit { self.finish(); return }
+                    if stalledFor >= self.recoveryDelay, !self.attemptedRecovery {
+                        self.attemptedRecovery = true
+                        self.player.playImmediately(atRate: 1)
+                    }
                 }
             }
+            stallTimer = timer
+            RunLoop.main.add(timer, forMode: .common)
         } else { player.pause() }
     }
 

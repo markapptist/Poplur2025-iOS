@@ -787,7 +787,7 @@ final class PoplurNotificationCenter: NSObject, ObservableObject, UNUserNotifica
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
-        content.sound = soundsEnabled ? .default : nil
+        content.sound = soundsEnabled ? UNNotificationSound(named: UNNotificationSoundName("poplur_pop.wav")) : nil
         content.badge = NSNumber(value: max(1, notifications.filter(\.isUnread).count))
         content.userInfo = [
             "poplurNotificationID": id,
@@ -865,7 +865,7 @@ final class PoplurNotificationCenter: NSObject, ObservableObject, UNUserNotifica
         let content = UNMutableNotificationContent()
         content.title = item.title
         content.body = item.detail
-        content.sound = .default
+        content.sound = soundsEnabled ? UNNotificationSound(named: UNNotificationSoundName("poplur_pop.wav")) : nil
         content.badge = NSNumber(value: max(1, notifications.filter(\.isUnread).count))
         content.userInfo = [
             "poplurNotificationID": item.id,
