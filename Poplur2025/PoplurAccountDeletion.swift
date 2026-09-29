@@ -4,7 +4,8 @@ import FirebaseAuth
 import FirebaseFunctions
 
 /// Account deletion is reachable from the shipping web Settings, but credentials
-/// and the final destructive confirmation stay in the native shell.
+/// and the final destructive confirmation stay in the native shell. The dialogs
+/// are the house-style PoplurDeletionDialogController (PoplurAccountDeletionDialog.swift).
 @MainActor
 final class PoplurAccountDeletion {
     static let shared = PoplurAccountDeletion()
@@ -24,42 +25,35 @@ final class PoplurAccountDeletion {
         guard !presenting, let user = Auth.auth().currentUser,
               let email = user.email, let presenter = Self.presenter else { return }
         presenting = true
-        let alert = UIAlertController(
-            title: "Delete account?",
-            message: "Permanently delete your Poplur account, profile, posts, uploaded media and messages you sent. This cannot be undone. Enter your password to confirm.",
-            preferredStyle: .alert
-        )
-        alert.addTextField {
-            $0.placeholder = "Password"
-            $0.isSecureTextEntry = true
-            $0.textContentType = .password
-            $0.autocorrectionType = .no
-        }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in self.presenting = false })
-        alert.addAction(UIAlertAction(title: "Delete account", style: .destructive) { [weak alert] _ in
-            let password = alert?.textFields?.first?.text ?? ""
-            alert?.textFields?.first?.text = nil
+        let model = PoplurDeletionDialogModel(phase: .confirm)
+        let dialog = PoplurDeletionDialogController(model: model)
+        model.onCancel = { [weak self, weak dialog] in
             Task { @MainActor in
-                if let alert { await self.dismiss(alert) }
-                await self.delete(user: user, email: email, password: password)
+                if let dialog { await self?.dismiss(dialog) }
+                self?.presenting = false
             }
-        })
-        presenter.present(alert, animated: true)
+        }
+        model.onConfirm = { [weak self, weak dialog] password in
+            guard let self, let dialog else { return }
+            Task { @MainActor in await self.delete(user: user, email: email, password: password, dialog: dialog) }
+        }
+        presenter.present(dialog, animated: true)
     }
 
-    private func delete(user: User, email: String, password: String) async {
+    private func delete(user: User, email: String, password: String, dialog: PoplurDeletionDialogController) async {
+        let model = dialog.model
         guard !password.isEmpty else {
-            presenting = false
-            showResult(title: "Password required", message: "Enter your password to verify that this is your account.")
+            model.inlineError = "Enter your password to verify that this is your account."
             return
         }
-        let progress = UIAlertController(title: "Deleting account…", message: "Removing your account and personal data. Please keep Poplur open.", preferredStyle: .alert)
+        // The dialog stays up and turns into its progress state, which blocks
+        // settings/session changes while either authentication request is in
+        // flight, including a slow token refresh.
+        model.inlineError = nil
+        model.phase = .working
         do {
             guard Auth.auth().currentUser?.uid == user.uid else { throw DeletionError.accountChanged }
-            guard let presenter = Self.presenter else { throw DeletionError.presentationUnavailable }
-            // Block settings/session changes while either authentication request
-            // is in flight, including a slow token refresh.
-            presenter.present(progress, animated: true)
+            guard dialog.viewIfLoaded?.window != nil else { throw DeletionError.presentationUnavailable }
             _ = try await user.reauthenticate(with: EmailAuthProvider.credential(withEmail: email, password: password))
             guard Auth.auth().currentUser?.uid == user.uid else { throw DeletionError.accountChanged }
             _ = try await user.getIDToken(forcingRefresh: true)
@@ -86,25 +80,29 @@ final class PoplurAccountDeletion {
                 // Clear embedded per-account caches before another person signs in.
                 await WKWebsiteDataStore.default().removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
             }
-            await dismiss(progress)
-            // Ending the deleted session cannot depend on an alert being visible
+            await dismiss(dialog)
+            // Ending the deleted session cannot depend on a dialog being visible
             // or acknowledged: this can finish while the device is locked.
             if Auth.auth().currentUser?.uid == user.uid {
                 NotificationCenter.default.post(name: .PoplurSignOutRequested, object: nil)
             }
             showResult(title: "Account deleted", message: "The Poplur account you confirmed and its personal data have been deleted.")
         } catch {
-            await dismiss(progress)
-            presenting = false
             let code = (error as NSError).code
             let authError = (error as NSError).domain == AuthErrorDomain
+            if authError && [AuthErrorCode.wrongPassword.rawValue, AuthErrorCode.invalidCredential.rawValue].contains(code) {
+                // Nothing reached the server: let them try again in place.
+                model.inlineError = "That password wasn't accepted. Your account has not been deleted. Try again."
+                model.phase = .confirm
+                return
+            }
+            await dismiss(dialog)
+            presenting = false
             let message: String
             if error as? DeletionError == .accountChanged {
                 message = "The signed-in account changed. Start account deletion again for the account you want to remove."
             } else if error as? DeletionError == .presentationUnavailable {
                 message = "Keep Poplur open and try Delete account again. No deletion request was sent."
-            } else if authError && [AuthErrorCode.wrongPassword.rawValue, AuthErrorCode.invalidCredential.rawValue].contains(code) {
-                message = "The password was not accepted. Your account has not been deleted. Try again."
             } else {
                 message = "Deletion could not be confirmed. Some data may already have been removed. Check your connection and retry Delete account to finish."
             }
@@ -112,10 +110,10 @@ final class PoplurAccountDeletion {
         }
     }
 
-    private func dismiss(_ alert: UIAlertController) async {
-        guard alert.presentingViewController != nil else { return }
+    private func dismiss(_ controller: UIViewController) async {
+        guard controller.presentingViewController != nil else { return }
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            alert.dismiss(animated: true) { continuation.resume() }
+            controller.dismiss(animated: true) { continuation.resume() }
         }
     }
 
@@ -134,10 +132,16 @@ final class PoplurAccountDeletion {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.presentPendingResult() }
             return
         }
-        let alert = UIAlertController(title: result.title, message: result.message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in self.presenting = false })
+        let model = PoplurDeletionDialogModel(phase: .result(title: result.title, message: result.message))
+        let dialog = PoplurDeletionDialogController(model: model)
+        model.onAcknowledge = { [weak self, weak dialog] in
+            Task { @MainActor in
+                if let dialog { await self?.dismiss(dialog) }
+                self?.presenting = false
+            }
+        }
         pendingResult = nil
-        presenter.present(alert, animated: true)
+        presenter.present(dialog, animated: true)
     }
 
     private static var presenter: UIViewController? {
