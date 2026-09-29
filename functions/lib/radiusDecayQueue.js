@@ -68,7 +68,10 @@ async function reconcileDecayPost(postId) {
             return;
         }
         const due = (0, mapDiscoveryPolicy_1.millis)(data.decayedAt) ? (0, mapDiscoveryPolicy_1.millis)(data.decayedAt) + 3600_000 : 0;
-        if (queue.exists && (0, mapDiscoveryPolicy_1.millis)(queue.data()?.dueAt) === due)
+        const existingDue = (0, mapDiscoveryPolicy_1.millis)(queue.data()?.dueAt);
+        // The worker can schedule the inactivity deadline before the next hourly
+        // tick. A post-change trigger must not push that deadline back an hour.
+        if (queue.exists && (existingDue === due || (existingDue > (0, mapDiscoveryPolicy_1.millis)(data.decayedAt) && existingDue < due)))
             return;
         tx.set(ref, { shard: (0, exports.decayShard)(postId), dueAt: firestore_1.Timestamp.fromMillis(due) });
     });

@@ -61,5 +61,43 @@ const db=admin.firestore(), {Timestamp}=admin.firestore;
  await Promise.all(events.map(e=>notify.run(e)));assert.equal(pushes,1);
  await Promise.all(events.map(e=>notify.run(e)));assert.equal(pushes,1);
  assert.ok((await db.doc('users/expiry-owner').get()).data().radiusReminderAtMillis>0);
+ // Two workers racing after a 48-hour gap must expire the post and debit
+ // its account exactly once under the six-hour policy.
+ await db.doc('testControl/radiusDecayTrial').set({enabled:true,multiplier:10,effectiveAtMillis:now-2*86400000,
+   halfLifeHours:6,halfLifeEffectiveAtMillis:now-2*86400000});
+ const rapid=db.doc('posts/rapid-expiry');
+ await db.doc('users/rapid-owner').set({claimRadiusMeters:100000});
+ await rapid.set({userID:'rapid-owner',organicRadiusMeters:100000,seedRadiusMeters:5000,radiusMeters:105000,
+   decayedAt:Timestamp.fromMillis(now-2*86400000),visibilityStatus:'published'});
+ await q.reconcileDecayPost(rapid.id);
+ const run=require('../lib/radiusDecay').runRadiusDecay;
+ await Promise.all([run(now,[rapid]),run(now,[rapid])]);
+ const rapidAfter=(await rapid.get()).data();
+ assert.equal(rapidAfter.radiusMeters,0);assert.equal(rapidAfter.visibilityStatus,'expired');
+ assert.equal(rapidAfter.radiusDecayOrganicPerDay,.9375);
+ assert.equal((await db.doc('users/rapid-owner').get()).data().claimRadiusMeters,0);
+ assert.equal((await rapid.collection('radiusHistory').get()).size,1);
+ console.log('Rapid decay: concurrent overdue workers expire reach, history and entitlement once');
+ const capped=db.doc('posts/world-inactive');
+ await db.doc('users/world-owner').set({claimRadiusMeters:6371000});
+ await capped.set({userID:'world-owner',organicRadiusMeters:6371000,seedRadiusMeters:0,radiusMeters:6371000,
+   decayedAt:Timestamp.now(),visibilityStatus:'published',createdAtMillis:now+100*86400000});
+ const born=(await capped.get()).createTime.toMillis();
+ const policy={enabled:true,multiplier:10,effectiveAtMillis:born,halfLifeHours:3,halfLifeEffectiveAtMillis:born,
+   inactivityExpiryHours:24,inactivityEffectiveAtMillis:born};
+ await db.doc('testControl/radiusDecayTrial').set(policy);
+ await q.reconcileDecayPost(capped.id);
+ const nearDeadline=born+23.75*3600000,deadline=born+24*3600000;
+ await run(nearDeadline,[capped]);
+ const scheduled=(await db.doc('radiusDecayQueue/'+capped.id).get()).data().dueAt.toMillis();
+ assert.ok(Math.abs(scheduled-deadline)<1);
+ await q.reconcileDecayPost(capped.id);
+ assert.equal((await db.doc('radiusDecayQueue/'+capped.id).get()).data().dueAt.toMillis(),scheduled);
+ assert.ok((await capped.get()).data().radiusMeters>0);
+ await run(deadline,[capped]);
+ assert.equal((await capped.get()).data().radiusMeters,0);
+ assert.equal((await capped.get()).data().visibilityStatus,'expired');
+ assert.equal((await db.doc('users/world-owner').get()).data().claimRadiusMeters,0);
+ console.log('24-hour cutoff: world reach expires; editable dates cannot renew it; early queue deadline survives reconciliation');
  console.log('Expiry, authenticated loss replay, legacy seeded decay, and deduplicated inbox passed');
 })().catch(e=>{console.error(e);process.exitCode=1}).finally(()=>admin.app().delete());

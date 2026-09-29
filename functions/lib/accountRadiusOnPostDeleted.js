@@ -57,7 +57,12 @@ exports.accountRadiusOnPostDeleted = (0, firestore_2.onDocumentDeleted)({ docume
     const db = admin.firestore();
     const receiptRef = db.collection(accountRadius_1.CLAIM_RADIUS_RECEIPTS).doc(event.params.postId);
     await db.runTransaction(async (transaction) => {
-        const receipt = await transaction.get(receiptRef);
+        const [receipt, deletion] = await Promise.all([
+            transaction.get(receiptRef),
+            transaction.get(db.collection("accountDeletions").doc(ownerUid)),
+        ]);
+        if (deletion.exists)
+            return;
         if (receipt.exists)
             return;
         transaction.create(receiptRef, {

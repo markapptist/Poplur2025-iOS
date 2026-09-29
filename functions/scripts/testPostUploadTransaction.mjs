@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { initializeTestEnvironment, assertFails } from '@firebase/rules-unit-testing';
-import { doc, setDoc, getDoc, runTransaction } from 'firebase/firestore';
+import { doc, setDoc, getDoc, runTransaction, serverTimestamp } from 'firebase/firestore';
 
 const env = await initializeTestEnvironment({
   projectId: 'demo-poplur-upload',
-  firestore: { host: '127.0.0.1', port: 8281, rules: readFileSync(new URL('../../firestore.rules', import.meta.url), 'utf8') },
+  firestore: { host: '127.0.0.1', port: Number(process.env.FIRESTORE_EMULATOR_HOST?.split(':').pop() ?? 8281), rules: readFileSync(new URL('../../firestore.rules', import.meta.url), 'utf8') },
 });
 const uid = 'upload-owner';
 const db = env.authenticatedContext(uid).firestore();
@@ -22,7 +22,7 @@ const draft = {
 };
 try {
   await env.withSecurityRulesDisabled(async ctx => {
-    await setDoc(doc(ctx.firestore(), 'users', uid), { claimRadiusMeters: 42893 });
+    await setDoc(doc(ctx.firestore(), 'users', uid), { earnedClaimMeters: 52893, committedClaimMeters: 10000, totalPostRadiusMeters: 2000000 });
     await setDoc(doc(ctx.firestore(), 'config', 'claimRadius'), { backfilled: true });
   });
   await assertFails(setDoc(postRef, draft)); // The screenshot's stale 56.5km draft.
@@ -34,7 +34,8 @@ try {
       return;
     }
     const user = (await tx.get(account)).data();
-    const radius = Math.min(draft.radius, Math.min(6371000, Math.max(0, user?.claimRadiusMeters ?? 0) + 5000));
+    const radius = Math.min(draft.radius, Math.min(6371000, Math.max(0, (user?.earnedClaimMeters ?? 0) - (user?.committedClaimMeters ?? 0)) + 5000));
+    tx.set(doc(db, 'postAdmissions', uid), { postId: 'retryable-photo', lastPostAt: serverTimestamp(), windowStartedAt: serverTimestamp(), postsInWindow: 1 });
     tx.set(postRef, { ...draft, radius, seedRadiusMeters: radius });
     tx.set(locationRef, { latitude: 25.028812, longitude: 121.56473, source: 'post-upload' }, { merge: true });
   });

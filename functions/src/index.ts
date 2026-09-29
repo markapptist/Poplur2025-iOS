@@ -19,6 +19,7 @@ import {
   validatePremiumAIInput,
 } from "./ai/premiumAiFlows";
 
+export { deleteMyAccount } from "./accountDeletion";
 export { verifyCardPurchase } from "./cardPurchases";
 export { poplurWalletPass, poplurOwnedCards } from "./walletPass";
 export { poplurPassWebService, poplurPassOnProfileChange } from "./walletPassWebService";
@@ -30,15 +31,17 @@ export { radiusDecayIndexChanged, radiusDecayDispatch, radiusDecayWorker } from 
 export { radiusDecay } from "./radiusDecay";
 export { radiusHistoryOnPostCreated } from "./radiusHistory";
 export { accountTotalRadiusOnPostWritten } from "./accountTotalRadius";
+export { postReplacesNearbyOwnPops } from "./postReplacesNearby";
+export { betaScorecard } from "./betaScorecard";
 export { accountRadiusOnPostDeleted } from "./accountRadiusOnPostDeleted";
-import { addAccountClaimRadius, claimRadiusDeltaMeters } from "./accountRadius";
+import { publishGeneratedPost } from "./generatedPostPublishing";
 import {
   MAX_POST_RADIUS_METERS,
   buildRadiusHistoryEntry,
   postRadiusParts,
   radiusHistoryEntryId,
 } from "./postEngagementPolicy";
-import { creationHistoryEntry, radiusHistoryDocument, radiusHistoryRef } from "./radiusHistory";
+import { radiusHistoryDocument, radiusHistoryRef } from "./radiusHistory";
 export { notifyOnDirectMessage } from "./directMessageNotifications";
 export { setAccountLocationPrivacy } from "./accountPrivacy";
 export { meshyGenerate, meshyStatus } from "./meshyModels";
@@ -215,6 +218,11 @@ export const poplurAiApi = onRequest(
     secrets: [googleAiApiKey, anthropicApiKey],
     timeoutSeconds: 300,
     memory: "1GiB",
+    // Match the deployed beta footprint: regional CPU capacity is shared by
+    // all functions. Keep this network-bound API within its existing cap.
+    cpu: "gcf_gen1",
+    concurrency: 1,
+    maxInstances: 3,
   },
   async (request, response) => {
     configureGoogleAIKey();
@@ -1065,85 +1073,9 @@ async function handlePublishGeneratedJob(
   const channelId = stringField(body.channelId, "channelId", 120);
   const radiusMeters = positiveInt(body.radiusMeters, 5000);
   const caption = optionalStringField(body.caption, 2000);
-  const jobRef = db.collection("aiGenerationJobs").doc(jobId);
-  const userRef = db.collection("users").doc(uid);
-  const [jobSnapshot, userSnapshot] = await Promise.all([jobRef.get(), userRef.get()]);
-  const job = jobSnapshot.data();
-
-  if (!jobSnapshot.exists || !job || job.userId !== uid) {
-    throw httpError(404, "job_not_found", "AI job not found.");
-  }
-  if (job.status !== "completed") {
-    throw httpError(409, "job_not_complete", "This AI job is not ready to publish yet.");
-  }
-
-  const chosenChannelId = chooseChannel(channelId, job.prompt, job.contentType);
-  const postRef = db.collection("posts").doc();
-  const outputAssetIds = Array.isArray(job.outputAssetIds) ? job.outputAssetIds : [];
-  const now = FieldValue.serverTimestamp();
-  const account = userSnapshot.data();
-  const hiddenOrigin = account?.privateAccount === true || account?.ghostMode === true;
-  const latitudeCell = Math.round(latitude * 1_000);
-  const longitudeCell = Math.round(longitude * 1_000);
-
-  const post: Record<string, unknown> = {
-    userId: uid,
-    userID: uid,
-    aiGenerated: true,
-    aiGenerationJobId: jobId,
-    assetIds: outputAssetIds,
-    channelId: chosenChannelId,
-    originalChannelId: channelId,
-    channelReviewStatus: chosenChannelId === channelId ? "approved" : "rerouted",
-    audience: "public",
-    locationVisibility: hiddenOrigin ? "hidden" : "approximate",
-    radiusMeters,
-    organicRadiusMeters: radiusMeters,
-    boostedRadiusMeters: 0,
-    visibilityStatus: "published",
-    caption: caption ?? job.outputText ?? "",
-    createdAt: now,
-    updatedAt: now,
-  };
-  if (!hiddenOrigin) {
-    post.latitude = latitudeCell / 1_000;
-    post.longitude = longitudeCell / 1_000;
-    post.latitudeCell = latitudeCell;
-    post.longitudeCell = longitudeCell;
-  }
-
-  const publishBatch = db.batch();
-  publishBatch.set(postRef, post);
-  // An AI publish is the one path that creates a post already holding earned
-  // radius, so the account's entitlement aggregate moves with it, in the batch
-  // that creates it. The web picker already counts this post's earned pool
-  // (accountRadiusPosts.ts); an aggregate that skipped it would sit BELOW the
-  // posts it summarises and refuse a claim the account really holds.
-  addAccountClaimRadius(publishBatch, userRef, claimRadiusDeltaMeters(0, radiusMeters));
-  // The pop's first history point, in the batch that creates it.
-  publishBatch.set(
-    radiusHistoryRef(postRef, radiusHistoryEntryId.create()),
-    radiusHistoryDocument(creationHistoryEntry(post, Date.now(), "poplurAiApi.publishGeneratedJob")),
-  );
-  publishBatch.set(userRef.collection("postLocations").doc(postRef.id), {
-    latitude,
-    longitude,
-    createdAt: now,
-    source: "ai-generated-post",
-  });
-  publishBatch.set(jobRef, {
-      publishedPostId: postRef.id,
-      publishedChannelId: chosenChannelId,
-      updatedAt: now,
-    }, { merge: true });
-  await publishBatch.commit();
-
-  res.status(200).json({
-    postId: postRef.id,
-    chosenChannelId,
-    originalChannelId: channelId,
-    rerouted: chosenChannelId !== channelId,
-  });
+  const result = await publishGeneratedPost(db, uid, jobId,
+    { latitude, longitude, channelId, radiusMeters, caption }, chooseChannel);
+  res.status(200).json(result);
 }
 
 async function handleRadiusBoost(

@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.studentDemoOnMessage = exports.studentDemoTick = exports.studentDemoOnPost = exports.syntheticDailySimulation = exports.poplurAiApi = exports.cameraSceneScan = exports.premiumAiAssist = exports.generateRetroGame = exports.testSessionIngest = exports.appPresence = exports.notificationPreferences = exports.testActivityControl = exports.refreshLiveNews = exports.liveNewsApi = exports.wardrobeGarmentApi = exports.meshyStatus = exports.meshyGenerate = exports.setAccountLocationPrivacy = exports.notifyOnDirectMessage = exports.accountRadiusOnPostDeleted = exports.accountTotalRadiusOnPostWritten = exports.radiusHistoryOnPostCreated = exports.radiusDecay = exports.radiusDecayWorker = exports.radiusDecayDispatch = exports.radiusDecayIndexChanged = exports.repairMapDiscovery = exports.mapDiscoveryWorker = exports.mapDiscoveryEnqueue = exports.mapDiscoveryOwnerChanged = exports.mapDiscoveryEngagement = exports.mapDiscoveryPostChanged = exports.queryMapDiscovery = exports.recordPostEngagement = exports.notifyOnEngagement = exports.notifyOnRadiusLoss = exports.poplurPassOnProfileChange = exports.poplurPassWebService = exports.poplurOwnedCards = exports.poplurWalletPass = exports.verifyCardPurchase = void 0;
+exports.studentDemoOnMessage = exports.studentDemoTick = exports.studentDemoOnPost = exports.syntheticDailySimulation = exports.poplurAiApi = exports.cameraSceneScan = exports.premiumAiAssist = exports.generateRetroGame = exports.testSessionIngest = exports.appPresence = exports.notificationPreferences = exports.testActivityControl = exports.refreshLiveNews = exports.liveNewsApi = exports.wardrobeGarmentApi = exports.meshyStatus = exports.meshyGenerate = exports.setAccountLocationPrivacy = exports.notifyOnDirectMessage = exports.accountRadiusOnPostDeleted = exports.betaScorecard = exports.postReplacesNearbyOwnPops = exports.accountTotalRadiusOnPostWritten = exports.radiusHistoryOnPostCreated = exports.radiusDecay = exports.radiusDecayWorker = exports.radiusDecayDispatch = exports.radiusDecayIndexChanged = exports.repairMapDiscovery = exports.mapDiscoveryWorker = exports.mapDiscoveryEnqueue = exports.mapDiscoveryOwnerChanged = exports.mapDiscoveryEngagement = exports.mapDiscoveryPostChanged = exports.queryMapDiscovery = exports.recordPostEngagement = exports.notifyOnEngagement = exports.notifyOnRadiusLoss = exports.poplurPassOnProfileChange = exports.poplurPassWebService = exports.poplurOwnedCards = exports.poplurWalletPass = exports.verifyCardPurchase = exports.deleteMyAccount = void 0;
 const sdk_1 = __importDefault(require("@anthropic-ai/sdk"));
 const admin = __importStar(require("firebase-admin"));
 const firebase_functions_1 = require("firebase-functions");
@@ -45,6 +45,8 @@ const https_1 = require("firebase-functions/v2/https");
 const firestore_1 = require("firebase-admin/firestore");
 const vertexImageFallback_1 = require("./vertexImageFallback");
 const premiumAiFlows_1 = require("./ai/premiumAiFlows");
+var accountDeletion_1 = require("./accountDeletion");
+Object.defineProperty(exports, "deleteMyAccount", { enumerable: true, get: function () { return accountDeletion_1.deleteMyAccount; } });
 var cardPurchases_1 = require("./cardPurchases");
 Object.defineProperty(exports, "verifyCardPurchase", { enumerable: true, get: function () { return cardPurchases_1.verifyCardPurchase; } });
 var walletPass_1 = require("./walletPass");
@@ -77,9 +79,13 @@ var radiusHistory_1 = require("./radiusHistory");
 Object.defineProperty(exports, "radiusHistoryOnPostCreated", { enumerable: true, get: function () { return radiusHistory_1.radiusHistoryOnPostCreated; } });
 var accountTotalRadius_1 = require("./accountTotalRadius");
 Object.defineProperty(exports, "accountTotalRadiusOnPostWritten", { enumerable: true, get: function () { return accountTotalRadius_1.accountTotalRadiusOnPostWritten; } });
+var postReplacesNearby_1 = require("./postReplacesNearby");
+Object.defineProperty(exports, "postReplacesNearbyOwnPops", { enumerable: true, get: function () { return postReplacesNearby_1.postReplacesNearbyOwnPops; } });
+var betaScorecard_1 = require("./betaScorecard");
+Object.defineProperty(exports, "betaScorecard", { enumerable: true, get: function () { return betaScorecard_1.betaScorecard; } });
 var accountRadiusOnPostDeleted_1 = require("./accountRadiusOnPostDeleted");
 Object.defineProperty(exports, "accountRadiusOnPostDeleted", { enumerable: true, get: function () { return accountRadiusOnPostDeleted_1.accountRadiusOnPostDeleted; } });
-const accountRadius_1 = require("./accountRadius");
+const generatedPostPublishing_1 = require("./generatedPostPublishing");
 const postEngagementPolicy_1 = require("./postEngagementPolicy");
 const radiusHistory_2 = require("./radiusHistory");
 var directMessageNotifications_1 = require("./directMessageNotifications");
@@ -215,6 +221,11 @@ exports.poplurAiApi = (0, https_1.onRequest)({
     secrets: [googleAiApiKey, anthropicApiKey],
     timeoutSeconds: 300,
     memory: "1GiB",
+    // Match the deployed beta footprint: regional CPU capacity is shared by
+    // all functions. Keep this network-bound API within its existing cap.
+    cpu: "gcf_gen1",
+    concurrency: 1,
+    maxInstances: 3,
 }, async (request, response) => {
     configureGoogleAIKey();
     await routePoplurAIRequest(request, response);
@@ -947,77 +958,8 @@ async function handlePublishGeneratedJob(uid, jobId, req, res) {
     const channelId = stringField(body.channelId, "channelId", 120);
     const radiusMeters = positiveInt(body.radiusMeters, 5000);
     const caption = optionalStringField(body.caption, 2000);
-    const jobRef = db.collection("aiGenerationJobs").doc(jobId);
-    const userRef = db.collection("users").doc(uid);
-    const [jobSnapshot, userSnapshot] = await Promise.all([jobRef.get(), userRef.get()]);
-    const job = jobSnapshot.data();
-    if (!jobSnapshot.exists || !job || job.userId !== uid) {
-        throw httpError(404, "job_not_found", "AI job not found.");
-    }
-    if (job.status !== "completed") {
-        throw httpError(409, "job_not_complete", "This AI job is not ready to publish yet.");
-    }
-    const chosenChannelId = chooseChannel(channelId, job.prompt, job.contentType);
-    const postRef = db.collection("posts").doc();
-    const outputAssetIds = Array.isArray(job.outputAssetIds) ? job.outputAssetIds : [];
-    const now = firestore_1.FieldValue.serverTimestamp();
-    const account = userSnapshot.data();
-    const hiddenOrigin = account?.privateAccount === true || account?.ghostMode === true;
-    const latitudeCell = Math.round(latitude * 1_000);
-    const longitudeCell = Math.round(longitude * 1_000);
-    const post = {
-        userId: uid,
-        userID: uid,
-        aiGenerated: true,
-        aiGenerationJobId: jobId,
-        assetIds: outputAssetIds,
-        channelId: chosenChannelId,
-        originalChannelId: channelId,
-        channelReviewStatus: chosenChannelId === channelId ? "approved" : "rerouted",
-        audience: "public",
-        locationVisibility: hiddenOrigin ? "hidden" : "approximate",
-        radiusMeters,
-        organicRadiusMeters: radiusMeters,
-        boostedRadiusMeters: 0,
-        visibilityStatus: "published",
-        caption: caption ?? job.outputText ?? "",
-        createdAt: now,
-        updatedAt: now,
-    };
-    if (!hiddenOrigin) {
-        post.latitude = latitudeCell / 1_000;
-        post.longitude = longitudeCell / 1_000;
-        post.latitudeCell = latitudeCell;
-        post.longitudeCell = longitudeCell;
-    }
-    const publishBatch = db.batch();
-    publishBatch.set(postRef, post);
-    // An AI publish is the one path that creates a post already holding earned
-    // radius, so the account's entitlement aggregate moves with it, in the batch
-    // that creates it. The web picker already counts this post's earned pool
-    // (accountRadiusPosts.ts); an aggregate that skipped it would sit BELOW the
-    // posts it summarises and refuse a claim the account really holds.
-    (0, accountRadius_1.addAccountClaimRadius)(publishBatch, userRef, (0, accountRadius_1.claimRadiusDeltaMeters)(0, radiusMeters));
-    // The pop's first history point, in the batch that creates it.
-    publishBatch.set((0, radiusHistory_2.radiusHistoryRef)(postRef, postEngagementPolicy_1.radiusHistoryEntryId.create()), (0, radiusHistory_2.radiusHistoryDocument)((0, radiusHistory_2.creationHistoryEntry)(post, Date.now(), "poplurAiApi.publishGeneratedJob")));
-    publishBatch.set(userRef.collection("postLocations").doc(postRef.id), {
-        latitude,
-        longitude,
-        createdAt: now,
-        source: "ai-generated-post",
-    });
-    publishBatch.set(jobRef, {
-        publishedPostId: postRef.id,
-        publishedChannelId: chosenChannelId,
-        updatedAt: now,
-    }, { merge: true });
-    await publishBatch.commit();
-    res.status(200).json({
-        postId: postRef.id,
-        chosenChannelId,
-        originalChannelId: channelId,
-        rerouted: chosenChannelId !== channelId,
-    });
+    const result = await (0, generatedPostPublishing_1.publishGeneratedPost)(db, uid, jobId, { latitude, longitude, channelId, radiusMeters, caption }, chooseChannel);
+    res.status(200).json(result);
 }
 async function handleRadiusBoost(uid, postId, req, res) {
     const body = objectBody(req);

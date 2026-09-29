@@ -35,10 +35,8 @@ exports.ACCOUNT_CLAIM_RADIUS_FIELD = "claimRadiusMeters";
  * cannot mint entitlement.
  */
 exports.POST_DISCOVERY_SEED_METERS = 5_000;
-/** The per-drop ceiling before 6 Sep 2026, and the bounded default the create
- *  rule falls back to while the backfill has not been marked complete. An
- *  account that has not been summed yet keeps the ceiling it had yesterday
- *  rather than being told it has earned nothing. */
+/** The flat per-drop ceiling before 6 Sep 2026. Retired: the rule no longer
+ *  has a migration fallback (config/claimRadius is backfilled). */
 exports.LEGACY_DROP_CEILING_METERS = 25_000;
 /** Marker the backfill flips when every account has an authoritative total.
  *  Read by firestore.rules; unreadable and unwritable by any client. */
@@ -115,14 +113,18 @@ function addAccountClaimRadius(writer, userRef, deltaMeters) {
  * The ceiling the create rule enforces, expressed once here so the rule, the
  * tests and the client picker can be checked against one definition rather
  * than three readings of the same sentence.
+ *
+ * Earned once, spent once: a drop may seed the free discovery grant plus
+ * whatever the account has earned (`earnedClaimMeters`, Σ organic over live
+ * posts) that is not already sitting on another live pop
+ * (`committedClaimMeters`, Σ seed − 5 km). Seeds never count toward what may
+ * be claimed — from 7 to 17 Sep 2026 they did, via the full-radius sum, and
+ * thirteen posts with no engagement reached the world radius.
  */
-function maxSeedRadiusMeters(accountClaimRadiusMeters, backfillComplete) {
-    const declared = finite(accountClaimRadiusMeters);
-    const earned = declared !== null && declared > 0 ? declared : 0;
-    const entitled = backfillComplete || earned > exports.LEGACY_DROP_CEILING_METERS
-        ? earned
-        : exports.LEGACY_DROP_CEILING_METERS;
-    return Math.min(postEngagementPolicy_1.MAX_POST_RADIUS_METERS, entitled + exports.POST_DISCOVERY_SEED_METERS);
+function maxSeedRadiusMeters(earnedClaimMeters, committedClaimMeters) {
+    const earned = Math.max(0, finite(earnedClaimMeters) ?? 0);
+    const committed = Math.max(0, finite(committedClaimMeters) ?? 0);
+    return Math.min(postEngagementPolicy_1.MAX_POST_RADIUS_METERS, Math.max(0, earned - committed) + exports.POST_DISCOVERY_SEED_METERS);
 }
 /**
  * The receipt collection that makes a deleted post's decrement exactly-once.

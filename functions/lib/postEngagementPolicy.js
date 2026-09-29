@@ -1,6 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.PostEngagementValidationError = exports.radiusHistoryEntryId = exports.RADIUS_HISTORY_COLLECTION = exports.RADIUS_DECAY_FLOOR_METERS = exports.RADIUS_DECAY_PER_DAY = exports.REPEAT_VIEW_BASE_METERS = exports.REPEAT_VIEW_MIN_MS = exports.MAX_POST_ENGAGEMENT_COUNT = exports.MAX_POST_SEED_METERS = exports.MAX_POST_RADIUS_METERS = exports.POST_ENGAGEMENT_SURFACES = exports.POST_ENGAGEMENT_KINDS = void 0;
+exports.radiusInactivityDeadline = radiusInactivityDeadline;
+exports.radiusDecayRates = radiusDecayRates;
 exports.buildRadiusHistoryEntry = buildRadiusHistoryEntry;
 exports.postRadiusParts = postRadiusParts;
 exports.parsePostEngagementInput = parsePostEngagementInput;
@@ -40,8 +42,58 @@ exports.REPEAT_VIEW_BASE_METERS = 500;
 /** Organic radius is a score you defend: it halves in ~13.5 days untouched.
  * Boost is paid product with its own expiry and never decays here. */
 exports.RADIUS_DECAY_PER_DAY = 0.05;
-/** Below this, decayed dust snaps to zero instead of shrinking forever. */
-exports.RADIUS_DECAY_FLOOR_METERS = 10;
+/** Below this a component snaps to zero, and a pop whose components are all
+ *  zero expires (radiusDecay → visibilityStatus 'expired'). 10 m until 18 Sep
+ *  2026: a dead pop then lingered for weeks at a reach nobody could find it in,
+ *  still on its owner's profile. Owner decision 18 Sep: a pop nobody within a
+ *  city block can find is gone. */
+exports.RADIUS_DECAY_FLOOR_METERS = 500;
+/** Creation time comes from Firestore document metadata, never an editable
+ * client date. lastEngagementAt is already protected by the posting rules. */
+function radiusInactivityDeadline(post, trial, createdAtMillis) {
+    trial = validDecayTrial(trial);
+    if (!trial || !Number.isFinite(trial.inactivityExpiryHours) || trial.inactivityExpiryHours < 1
+        || trial.inactivityExpiryHours > 168 || !Number.isFinite(trial.inactivityEffectiveAtMillis)
+        || !Number.isFinite(createdAtMillis))
+        return null;
+    const activity = timestampMillis(post.lastEngagementAt) ?? createdAtMillis;
+    return Math.max(createdAtMillis, activity, trial.effectiveAtMillis, trial.inactivityEffectiveAtMillis)
+        + trial.inactivityExpiryHours * 3600_000;
+}
+function validDecayTrial(trial) {
+    return trial && Number.isFinite(trial.multiplier) && trial.multiplier >= 1 && trial.multiplier <= 10
+        && Number.isFinite(trial.effectiveAtMillis) ? trial : undefined;
+}
+function rapidDecayStart(trial) {
+    return trial && Number.isFinite(trial.halfLifeHours) && trial.halfLifeHours >= 1 && trial.halfLifeHours <= 24
+        && Number.isFinite(trial.halfLifeEffectiveAtMillis)
+        ? Math.max(trial.effectiveAtMillis, trial.halfLifeEffectiveAtMillis) : Infinity;
+}
+/** Split at activation boundaries so a missed worker catches up at the rate
+ * that actually applied. Enabling a faster policy never backdates that rate. */
+function radiusDecayFactor(start, end, rate, trial, component) {
+    const componentStart = component === 'organic' ? start : Math.max(start, component === 'seed' ? trial?.effectiveAtMillis ?? Infinity : trial?.boostedEffectiveAtMillis ?? Infinity);
+    if (end <= componentStart)
+        return 1;
+    const rapidStart = rapidDecayStart(trial);
+    const oldEnd = Math.min(end, rapidStart);
+    const oldMs = Math.max(0, oldEnd - componentStart);
+    const multipliedMs = trial ? Math.max(0, oldEnd - Math.max(componentStart, trial.effectiveAtMillis)) : 0;
+    const weightedMs = oldMs + multipliedMs * ((trial?.multiplier ?? 1) - 1);
+    const rapidMs = Math.max(0, end - Math.max(componentStart, rapidStart));
+    return Math.pow(1 - rate, weightedMs / 86_400_000)
+        * (rapidMs > 0 ? Math.pow(0.5, rapidMs / (trial.halfLifeHours * 3600_000)) : 1);
+}
+/** The same policy drives the read-only client projection between ticks. */
+function radiusDecayRates(nowMillis, trial, rate = exports.RADIUS_DECAY_PER_DAY) {
+    trial = validDecayTrial(trial);
+    const active = trial && nowMillis >= trial.effectiveAtMillis;
+    const organic = nowMillis >= rapidDecayStart(trial)
+        ? 1 - Math.pow(0.5, 24 / trial.halfLifeHours)
+        : 1 - Math.pow(1 - rate, active ? trial.multiplier : 1);
+    return { organic, seed: active ? organic : 0,
+        boost: active && Number.isFinite(trial.boostedEffectiveAtMillis) && nowMillis >= trial.boostedEffectiveAtMillis ? organic : 0 };
+}
 const POST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 const EVENT_ID_PATTERN = /^[A-Za-z0-9._:-]{16,128}$/;
 const ALLOWED_INPUT_KEYS = new Set(["postId", "eventId", "kind", "text", "surface"]);
@@ -263,10 +315,8 @@ function radiusDelta(kind, nowMillis, actor, isOwner) {
  * post.decayedAt, server-owned. The all-user trial also decays legacy seeded
  * boost components from its explicit activation time, without retroactive loss.
  */
-function calculateRadiusDecay(post, nowMillis, ratePerDay = exports.RADIUS_DECAY_PER_DAY, trial) {
-    if (trial && (!Number.isFinite(trial.multiplier) || trial.multiplier < 1 || trial.multiplier > 10
-        || !Number.isFinite(trial.effectiveAtMillis)))
-        trial = undefined;
+function calculateRadiusDecay(post, nowMillis, ratePerDay = exports.RADIUS_DECAY_PER_DAY, trial, createdAtMillis) {
+    trial = validDecayTrial(trial);
     const radius = currentRadius(post, nowMillis);
     const decayBoost = trial && Number.isFinite(trial.boostedEffectiveAtMillis)
         && nowMillis >= trial.boostedEffectiveAtMillis;
@@ -275,25 +325,26 @@ function calculateRadiusDecay(post, nowMillis, ratePerDay = exports.RADIUS_DECAY
     const decayedAtMillis = timestampMillis(post.decayedAt);
     if (decayedAtMillis == null)
         return null;
+    const deadline = createdAtMillis == null ? null : radiusInactivityDeadline(post, trial, createdAtMillis);
+    if (deadline != null && nowMillis >= deadline) {
+        const boost = decayBoost ? 0 : radius.boost;
+        return { organicRadiusMeters: 0, seedRadiusMeters: 0,
+            ...(decayBoost ? { boostedRadiusMeters: 0 } : {}), radiusMeters: boost };
+    }
     const elapsedMs = nowMillis - decayedAtMillis;
     if (elapsedMs < 60_000)
         return null;
-    const multiplier = trial && Number.isFinite(trial.multiplier) && trial.multiplier >= 1 && trial.multiplier <= 10
-        && Number.isFinite(trial.effectiveAtMillis) ? trial.multiplier : 1;
-    const trialElapsedMs = trial ? Math.max(0, nowMillis - Math.max(decayedAtMillis, trial.effectiveAtMillis)) : 0;
-    const weightedElapsedMs = elapsedMs + trialElapsedMs * (multiplier - 1);
-    const factor = Math.pow(1 - ratePerDay, weightedElapsedMs / 86_400_000);
+    const factor = radiusDecayFactor(decayedAtMillis, nowMillis, ratePerDay, trial, 'organic');
     let organic = Math.floor(radius.organic * factor);
     if (organic < exports.RADIUS_DECAY_FLOOR_METERS)
         organic = 0;
     // The trial expires the free discovery grant too; otherwise every post
     // would keep a permanent seed even after all its earned reach was gone.
-    const seedFactor = Math.pow(1 - ratePerDay, trialElapsedMs * multiplier / 86_400_000);
+    const seedFactor = radiusDecayFactor(decayedAtMillis, nowMillis, ratePerDay, trial, 'seed');
     let seed = trial ? Math.floor(radius.seed * seedFactor) : radius.seed;
     if (trial && seed < exports.RADIUS_DECAY_FLOOR_METERS)
         seed = 0;
-    const boostElapsedMs = decayBoost ? Math.max(0, nowMillis - Math.max(decayedAtMillis, trial.boostedEffectiveAtMillis)) : 0;
-    let boost = decayBoost ? Math.floor(radius.boost * Math.pow(1 - ratePerDay, boostElapsedMs * multiplier / 86_400_000)) : radius.boost;
+    let boost = decayBoost ? Math.floor(radius.boost * radiusDecayFactor(decayedAtMillis, nowMillis, ratePerDay, trial, 'boost')) : radius.boost;
     if (decayBoost && boost < exports.RADIUS_DECAY_FLOOR_METERS)
         boost = 0;
     if (organic >= radius.organic && seed >= radius.seed && boost >= radius.boost)

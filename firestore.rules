@@ -3,7 +3,8 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() {
-      return request.auth != null;
+      return request.auth != null
+        && !exists(/databases/$(database)/documents/accountDeletions/$(request.auth.uid));
     }
 
     function isSelf(userId) {
@@ -70,10 +71,14 @@ service cloud.firestore {
       return ['verificationTier', 'verificationStatus'];
     }
 
-    // Both aggregates are server-owned. The full post-radius sum grants the
-    // claim allowance; the earned sum remains available for engagement history.
+    // Every aggregate and clock the create rule reads is server-owned
+    // (accountTotalRadiusOnPostWritten, recordPostEngagement, radiusDecay).
+    // The full post-radius sum is the profile's number; earned − committed is
+    // the claim allowance; the post-rate fields are the throttle.
     function serverOwnedAccountRadiusFields() {
-      return ['claimRadiusMeters', 'claimRadiusUpdatedAt', 'totalPostRadiusMeters', 'totalPostRadiusUpdatedAt'];
+      return ['claimRadiusMeters', 'claimRadiusUpdatedAt', 'totalPostRadiusMeters', 'totalPostRadiusUpdatedAt',
+        'earnedClaimMeters', 'committedClaimMeters',
+        'lastPostAtMillis', 'postWindowStartMillis', 'postsInWindow'];
     }
 
     function doesNotWritePremiumAIFields() {
@@ -140,39 +145,94 @@ service cloud.firestore {
       ];
     }
 
-    // Legacy earned total, used only until the full post sum is backfilled.
-    function accountClaimRadiusMeters(userId) {
+    function accountMeters(userId, field) {
       let path = /databases/$(database)/documents/users/$(userId);
-      let declared = exists(path) ? get(path).data.get('claimRadiusMeters', 0) : 0;
-      return declared is number && declared > 0 ? declared : 0;
+      let value = exists(path) ? get(path).data.get(field, 0) : 0;
+      return value is number && value > 0 ? value : 0;
     }
 
-    // Flipped by scripts/backfillAccountClaimRadius.js once every account has
-    // an authoritative total. Nothing may read or write config/ — a rule's own
-    // get() is not subject to rules, and the catch-all denies clients.
-    function claimRadiusBackfillComplete() {
-      let path = /databases/$(database)/documents/config/claimRadius;
-      return exists(path) && get(path).data.get('backfilled', false) == true;
-    }
-
-    // Until the backfill is marked complete an existing account has no sum
-    // yet, and must not be told it has earned nothing mid-migration: it keeps
-    // the flat 25 km per-drop ceiling it had before 6 Sep 2026. Once the
-    // marker is set, absent means zero, which is the honest answer for an
-    // account that has published nothing.
+    // What the account may seed on its next drop: the free 5 km discovery
+    // grant plus what it has EARNED (Σ organic over live posts) that is not
+    // already COMMITTED on another live pop (Σ seed − 5 km). Both sums are
+    // maintained by accountTotalRadiusOnPostWritten; absent means zero, which
+    // is the honest answer for an account that has published nothing.
     //
-    // The world radius stays the outer bound: an account whose posts sum past
-    // the planet still cannot put more than the planet on one drop, and every
-    // radius reader clamps there anyway (poplur-clay-map worldRadius.ts).
+    // Seeds never count toward the claim. From 7 to 17 Sep 2026 the ceiling
+    // was the full-radius sum (totalPostRadiusMeters), so every drop could
+    // claim the sum of every drop before it: thirteen posts with no engagement
+    // reached the world radius. The world radius stays the outer bound.
     function maxSeedRadiusMeters(userId) {
-      let path = /databases/$(database)/documents/users/$(userId);
-      let total = exists(path) ? get(path).data.get('totalPostRadiusMeters', null) : null;
-      // Existing clients keep the previous allowance until their account's
-      // full post sum has been reconciled by the server.
-      let earned = accountClaimRadiusMeters(userId);
-      let legacy = (claimRadiusBackfillComplete() || earned > 25000) ? earned + 5000 : 30000;
-      let ceiling = total is number ? (total > 5000 ? total : 5000) : legacy;
+      let earned = accountMeters(userId, 'earnedClaimMeters');
+      let committed = accountMeters(userId, 'committedClaimMeters');
+      let ceiling = (earned > committed ? earned - committed : 0) + 5000;
       return ceiling > 6371000 ? 6371000 : ceiling;
+    }
+
+    // Synthetic actors post at cohort cadence and are exempt from the human
+    // post rate only. Auth uids are random, so the prefix cannot collide with
+    // a person (functions/src/syntheticIdentity.ts).
+    function syntheticActor() {
+      return request.auth.uid.matches('(sim|synthetic)-.*');
+    }
+
+    // Legacy counters are used only when migrating an account to its first
+    // atomic admission. After that, postAdmissions is the authoritative clock.
+    function withinPostRate(userId) {
+      let path = /databases/$(database)/documents/users/$(userId);
+      let last = exists(path) ? get(path).data.get('lastPostAtMillis', 0) : 0;
+      let start = exists(path) ? get(path).data.get('postWindowStartMillis', 0) : 0;
+      let count = exists(path) ? get(path).data.get('postsInWindow', 0) : 0;
+      let now = request.time.toMillis();
+      return syntheticActor()
+        || ((!(last is number) || now - last >= 60000)
+          && (!(start is number) || !(count is number) || now - start >= 86400000 || count < 30));
+    }
+
+    // A human post and its account's admission must commit together. Every
+    // creation points at a DIFFERENT postId, so a batch cannot attach several
+    // posts to one slot. request.time is the server clock, never createdAt or
+    // a phone's clock. getAfter is evaluated before the atomic commit.
+    function hasPostAdmission(userId, postId) {
+      let path = /databases/$(database)/documents/postAdmissions/$(userId);
+      let after = getAfter(path).data;
+      return after.postId == postId && after.lastPostAt == request.time
+        && (!exists(path) || get(path).data.postId != postId);
+    }
+
+    function validPostAdmissionShape(userId) {
+      let d = request.resource.data;
+      let postPath = /databases/$(database)/documents/posts/$(d.postId);
+      return d.keys().hasOnly(['postId', 'lastPostAt', 'windowStartedAt', 'postsInWindow'])
+        && d.postId is string && d.postId.size() > 0 && d.postId.size() <= 128
+        && d.lastPostAt == request.time && d.windowStartedAt is timestamp
+        && d.postsInWindow is int && d.postsInWindow > 0 && d.postsInWindow <= 30
+        && !exists(postPath)
+        && getAfter(postPath).data.get('userID', getAfter(postPath).data.get('userId', '')) == userId;
+    }
+
+    function validFirstPostAdmission(userId) {
+      let path = /databases/$(database)/documents/users/$(userId);
+      let account = exists(path) ? get(path).data : {};
+      let start = account.get('postWindowStartMillis', 0);
+      let count = account.get('postsInWindow', 0);
+      let active = start is number && count is number && start > 0
+        && request.time.toMillis() - start < 86400000;
+      let d = request.resource.data;
+      return withinPostRate(userId)
+        && (active
+          ? (d.windowStartedAt.toMillis() == start && d.postsInWindow == (count > 0 ? count : 0) + 1)
+          : (d.windowStartedAt == request.time && d.postsInWindow == 1));
+    }
+
+    function validNextPostAdmission() {
+      let before = resource.data;
+      let d = request.resource.data;
+      let active = request.time - before.windowStartedAt < duration.value(24, 'h');
+      return request.time - before.lastPostAt >= duration.value(60, 's')
+        && d.postId != before.postId
+        && (active
+          ? (d.windowStartedAt == before.windowStartedAt && d.postsInWindow == before.postsInWindow + 1)
+          : (d.windowStartedAt == request.time && d.postsInWindow == 1));
     }
 
     // A new post may claim up to the account's full current post-radius sum
@@ -509,12 +569,30 @@ service cloud.firestore {
       }
     }
 
+    // World-readable, server-written summaries (the beta scorecard the landing
+    // page and the Test Center both show). Counts and dates only — never a uid.
+    match /public/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /postAdmissions/{userId} {
+      allow read: if isSelf(userId);
+      allow create: if isSelf(userId) && validPostAdmissionShape(userId)
+        && validFirstPostAdmission(userId);
+      allow update: if isSelf(userId) && validPostAdmissionShape(userId)
+        && validNextPostAdmission();
+      // Deleting a post or profile must never reset the publishing limit.
+      allow delete: if false;
+    }
+
     match /posts/{postId} {
       allow read: if true;
       allow create: if signedIn()
         && (request.resource.data.userID == request.auth.uid
           || request.resource.data.userId == request.auth.uid)
         && validNewPostEngagementSeed(request.auth.uid)
+        && (syntheticActor() || hasPostAdmission(request.auth.uid, postId))
         && validPostOrigin(request.auth.uid);
       allow update: if signedIn()
         && (resource.data.userID == request.auth.uid
