@@ -455,8 +455,8 @@ struct PoplurClayMapView: UIViewRepresentable {
                   let type = body["type"] as? String else { return }
             switch type {
             case "pop":
+                // WebAudio owns the pop; this event is haptic-only.
                 popHaptic.impactOccurred()
-                PoplurSoundPlayer.shared.playPop()
             case "poiTap":
                 // Phase 1.5: route body["id"] to the channel/post flow
                 break
