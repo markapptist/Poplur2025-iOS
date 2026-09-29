@@ -1,5 +1,6 @@
 import SwiftUI
 import WebKit
+import Combine
 import UniformTypeIdentifiers
 import FirebaseAuth
 import CoreLocation
@@ -38,6 +39,9 @@ enum PoplurPreloginWeb {
     // the three.js import map, and dynamic import() all require it (see the
     // note on PoplurClayWebMap for why file:// silently fails).
     static let scheme = "poplur-prelogin"
+    /// The approved web flow IS the pre-login (matches the web version). The
+    /// native SwiftUI onboarding stays in the tree behind this switch only.
+    static let isEnabled = true
     static let host = "app"
 
     /// The prototype's splash beat before handing off to Welcome.
@@ -116,10 +120,151 @@ enum PoplurPreloginWeb {
 
 struct PreloginWebView: UIViewRepresentable {
     let auth: AuthViewModel
+    /// Open on Welcome instead of the web splash. Set when the native cold-launch
+    /// splash has just played the same approved clip, so it is not shown twice.
+    var startAtWelcome = false
     /// Called when the web flow reports `complete` (Phase 3 handoff hook).
     var onComplete: () -> Void = {}
+    /// Called once Welcome has finished loading (lets a held native splash lift).
+    var onWelcomeLoaded: () -> Void = {}
 
-    func makeCoordinator() -> Coordinator { Coordinator(auth: auth, onComplete: onComplete) }
+    func makeCoordinator() -> Coordinator {
+        Coordinator(auth: auth, onComplete: onComplete, onWelcomeLoaded: onWelcomeLoaded)
+    }
+
+    /// App Store guideline 5.1.1(iv): the app must not show its own look-alike
+    /// permission alerts. Welcome opens its clay location / camera-roll cards
+    /// unless this session flag is already set, so the shell sets it before the
+    /// page runs. The approved page itself is unchanged; iOS asks with the system
+    /// prompt when a feature that needs the permission is opened.
+    static let skipLookalikePermissionCards = #"""
+        try { sessionStorage.setItem('poplurWelcomePerms', '1') } catch (e) {}
+        """#
+
+    /// Face ID sign-in is not wired on the web pre-login (the bridge answers
+    /// "not available" and nothing saves credentials for it), so the button
+    /// would be a dead control in the app. Hidden here, with its "or sign in
+    /// with email" lead-in; the web version keeps it. Email + password is the
+    /// shipping sign-in, and the App Review answers say so.
+    static let hideUnwiredFaceIDButton = #"""
+        (function () {
+          var style = document.createElement('style')
+          style.textContent = '#faceIdBtn, #faceIdBtn + .stackSub { display: none !important; }'
+          ;(document.head || document.documentElement).appendChild(style)
+        })();
+        """#
+
+    /// Pre-login is the one screen whose whole content is authored motion —
+    /// the confetti shower, the clay stud world and the login cube. The shared
+    /// governor (PoplurManagedWebView's bootstrap) paces every document's
+    /// requestAnimationFrame at the foreground budget between touches: 30 fps
+    /// in FULL, 8 fps while the phone is charging or thermally fair — and does
+    /// it through a timer→rAF hop that lands on uneven 33/50 ms steps. The
+    /// confetti physics clamp dt at 50 ms, so at 8 fps the shower plays in
+    /// slow motion: "the confetti is lagging" (owner, 24 Sep 2026), while the
+    /// web version runs at the display rate.
+    ///
+    /// This script runs AFTER that bootstrap (it is added to the content
+    /// controller once the managed view exists) and re-wraps rAF for this
+    /// document only: while `__poplurPreloginSmooth` is true the frames go to
+    /// the display clock the bootstrap exposes (`__poplurDisplayRAF`), paced to
+    /// an even 60 fps on ProMotion panels; otherwise they fall through to the
+    /// governed cadence unchanged. Native flips the flag from the manager's
+    /// thermal signals (observeThermalHeadroom): real heat, the tripwire
+    /// cooldown, Low Power Mode and memory pressure all hand the cadence back.
+    /// Frames are never run while the governor's lease is inactive
+    /// (`__poplurDisplayActive`), so a covered or backgrounded view stays
+    /// parked exactly as before. The page itself is approved Good Copy and is
+    /// not edited.
+    static func displayClockScript(initiallySmooth: Bool, frameStats: Bool) -> String {
+        #"""
+        (() => {
+          const governedRAF = window.requestAnimationFrame;
+          const governedCAF = window.cancelAnimationFrame;
+          const displayRAF = window.__poplurDisplayRAF;
+          const displayCAF = window.__poplurCancelDisplayRAF;
+          const displayActive = window.__poplurDisplayActive;
+          if (typeof displayRAF !== 'function' || typeof displayActive !== 'function') return;
+          window.__poplurPreloginSmooth = __INITIAL_SMOOTH__;
+          const TARGET_MS = 1000 / 60;
+          const queue = new Map();
+          const governed = new Map();
+          let seq = 0, driver = 0, lastFlush = 0;
+          let frames = 0, lastNow = -1, windowStart = performance.now();
+          function count(now) {
+            if (now !== lastNow) { lastNow = now; frames++; }
+          }
+          function flush(now) {
+            driver = 0;
+            if (!queue.size) return;
+            if (now - lastFlush < TARGET_MS - 1.5) { driver = displayRAF(flush); return; }
+            lastFlush = now;
+            count(now);
+            const callbacks = Array.from(queue.values());
+            queue.clear();
+            for (const cb of callbacks) {
+              try { cb(now); } catch (error) { setTimeout(() => { throw error; }, 0); }
+            }
+            if (queue.size && !driver) driver = displayRAF(flush);
+          }
+          window.requestAnimationFrame = callback => {
+            const id = ++seq;
+            if (window.__poplurPreloginSmooth && displayActive()) {
+              queue.set(id, callback);
+              if (!driver) driver = displayRAF(flush);
+            } else {
+              governed.set(id, governedRAF(now => { governed.delete(id); count(now); callback(now); }));
+            }
+            return id;
+          };
+          window.cancelAnimationFrame = id => {
+            if (queue.delete(id)) {
+              if (!queue.size && driver) { displayCAF(driver); driver = 0; }
+              return;
+            }
+            const handle = governed.get(id);
+            if (handle !== undefined) { governed.delete(id); governedCAF(handle); }
+          };
+          if (__FRAME_STATS__) {
+            setInterval(() => {
+              const now = performance.now();
+              const seconds = (now - windowStart) / 1000;
+              const fps = seconds > 0 ? frames / seconds : 0;
+              frames = 0; windowStart = now;
+              try {
+                window.webkit.messageHandlers.poplur.postMessage({
+                  action: 'preloginFrameStats',
+                  fps: Math.round(fps * 10) / 10,
+                  smooth: !!window.__poplurPreloginSmooth,
+                  path: (window.__poplurPreloginSmooth && displayActive()) ? 'display' : 'governed',
+                  page: location.pathname
+                });
+              } catch (e) {}
+            }, 5000);
+          }
+        })();
+        """#
+        .replacingOccurrences(of: "__INITIAL_SMOOTH__", with: initiallySmooth ? "true" : "false")
+        .replacingOccurrences(of: "__FRAME_STATS__", with: frameStats ? "true" : "false")
+    }
+
+    /// `-PoplurPreloginFrameStats` at launch appends the measured pre-login
+    /// frame rate to poplur-diag.log every 5 s (see PoplurDiagLog for the pull
+    /// command). Off in every normal launch.
+    static var frameStatsRequested: Bool {
+        ProcessInfo.processInfo.arguments.contains("-PoplurPreloginFrameStats")
+    }
+
+    /// The pre-login may take the display clock only while the phone has
+    /// thermal headroom. Charging alone does not count: the manager floors the
+    /// mode at REDUCED on a charger as a precaution, which is right for the map
+    /// and camera, but it is what made the launch screen crawl.
+    static func hasThermalHeadroom(_ manager: PoplurPerformanceManager = .shared) -> Bool {
+        manager.thermalState == .nominal
+            && !manager.isThermalTripwireActive
+            && !manager.isLowPowerModeEnabled
+            && !manager.memoryPressureActive
+    }
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -138,6 +283,14 @@ struct PreloginWebView: UIViewRepresentable {
         let splashProbe = PoplurPreloginWeb.splashVideoProbe
         config.userContentController.addUserScript(
             WKUserScript(source: splashProbe, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
+        )
+        config.userContentController.addUserScript(
+            WKUserScript(source: Self.skipLookalikePermissionCards,
+                         injectionTime: .atDocumentStart, forMainFrameOnly: true)
+        )
+        config.userContentController.addUserScript(
+            WKUserScript(source: Self.hideUnwiredFaceIDButton,
+                         injectionTime: .atDocumentEnd, forMainFrameOnly: true)
         )
 
         let webRoot = Self.bundledRootURL()
@@ -177,6 +330,19 @@ struct PreloginWebView: UIViewRepresentable {
         // so pin the web content to dark regardless of the device appearance.
         webView.overrideUserInterfaceStyle = .dark
         context.coordinator.webView = webView
+        // After the managed view's own governor bootstrap, so this runs second
+        // and can wrap the governed requestAnimationFrame (see displayClockScript).
+        webView.configuration.userContentController.addUserScript(
+            WKUserScript(
+                source: Self.displayClockScript(
+                    initiallySmooth: Self.hasThermalHeadroom(),
+                    frameStats: Self.frameStatsRequested
+                ),
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            )
+        )
+        context.coordinator.observeThermalHeadroom()
 
         // Launch shows the SPLASH, always.
         //
@@ -198,7 +364,12 @@ struct PreloginWebView: UIViewRepresentable {
         // The original guarantee stands via the failsafe armed here: a splash
         // that never finishes loading still hands off (10s cap), so nobody can
         // be stranded on the intro.
-        if webRoot != nil, let splashURL = PoplurPreloginWeb.splashURL {
+        if startAtWelcome, webRoot != nil, let welcomeURL = PoplurPreloginWeb.welcomeURL {
+            // The native splash already played the approved clip and holds its
+            // last frame over this view until Welcome reports loaded.
+            context.coordinator.welcomeHandoffDone = true
+            webView.load(URLRequest(url: welcomeURL))
+        } else if webRoot != nil, let splashURL = PoplurPreloginWeb.splashURL {
             webView.load(URLRequest(url: splashURL))
             context.coordinator.armSplashFailsafe()
         } else if webRoot != nil, let welcomeURL = PoplurPreloginWeb.welcomeURL {
@@ -404,20 +575,60 @@ struct PreloginWebView: UIViewRepresentable {
         weak var webView: WKWebView?
         private let auth: AuthViewModel
         private let onComplete: () -> Void
+        private let onWelcomeLoaded: () -> Void
         private let popHaptic = UIImpactFeedbackGenerator(style: .medium)
         private let locationRequester = CLLocationManager()
         private var locationPermissionRequestInFlight = false
         private var photoPermissionRequestInFlight = false
         /// The splash→welcome handoff fires exactly once, whoever asks first:
         /// the post-render beat, the load-failure path, or the failsafe.
-        private var welcomeHandoffDone = false
+        fileprivate var welcomeHandoffDone = false
         private var splashFailsafe: DispatchWorkItem?
+        private var thermalSubscription: AnyCancellable?
+        private var hasThermalHeadroom = PreloginWebView.hasThermalHeadroom()
 
-        init(auth: AuthViewModel, onComplete: @escaping () -> Void) {
+        init(auth: AuthViewModel, onComplete: @escaping () -> Void, onWelcomeLoaded: @escaping () -> Void) {
             self.auth = auth
             self.onComplete = onComplete
+            self.onWelcomeLoaded = onWelcomeLoaded
             super.init()
             observeAppLifecycle()
+        }
+
+        // MARK: - Display clock (see PreloginWebView.displayClockScript)
+
+        /// Follows the performance manager's thermal signals and tells the
+        /// document whether it may keep the display clock. Pushed again on
+        /// every navigation (didCommit) because the injected script's initial
+        /// value was fixed when the view was made.
+        func observeThermalHeadroom() {
+            let manager = PoplurPerformanceManager.shared
+            thermalSubscription = Publishers.CombineLatest4(
+                manager.$thermalState,
+                manager.$isThermalTripwireActive,
+                manager.$isLowPowerModeEnabled,
+                manager.$memoryPressureActive
+            )
+            .map { thermal, tripwire, lowPower, memory in
+                thermal == .nominal && !tripwire && !lowPower && !memory
+            }
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] smooth in
+                self?.hasThermalHeadroom = smooth
+                self?.pushThermalHeadroom()
+            }
+        }
+
+        private func pushThermalHeadroom() {
+            webView?.evaluateJavaScript(
+                "window.__poplurPreloginSmooth = \(hasThermalHeadroom); true;",
+                completionHandler: nil
+            )
+        }
+
+        func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+            pushThermalHeadroom()
         }
 
         // MARK: - Background audio
@@ -532,6 +743,7 @@ struct PreloginWebView: UIViewRepresentable {
         /// preloaded video reveals right behind that — so the beat is spent
         /// showing the approved clay video, not absorbing process spin-up.
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            if webView.url?.path.hasSuffix("/welcome.html") == true { onWelcomeLoaded() }
             guard !welcomeHandoffDone,
                   webView.url?.path.hasSuffix("/splash.html") == true else { return }
             splashFailsafe?.cancel()
@@ -572,6 +784,13 @@ struct PreloginWebView: UIViewRepresentable {
                 )
             case "pop":
                 popHaptic.impactOccurred()
+            case "preloginFrameStats":
+                // Only ever sent when launched with -PoplurPreloginFrameStats.
+                let fps = body?["fps"] as? Double ?? 0
+                let path = body?["path"] as? String ?? "?"
+                let smooth = body?["smooth"] as? Bool ?? false
+                let page = body?["page"] as? String ?? "?"
+                PoplurDiagLog.append("[PreloginWebView] frameStats fps=\(fps) path=\(path) smooth=\(smooth) page=\(page)")
             case "signIn":
                 // BUG-2 fix: real Firebase sign-in, mirroring LoginView.loginUser().
                 // On success we do NOT fake anything — the AuthViewModel state

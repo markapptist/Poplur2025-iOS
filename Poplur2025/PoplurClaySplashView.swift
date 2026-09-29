@@ -59,12 +59,12 @@ struct NativePreloginSplash: View {
                 )
                 .allowsHitTesting(false)
                 VStack(spacing: 16) {
-                    Text(messages[Int(playback.elapsed / 0.85) % messages.count])
+                    Text(playback.hasFinished ? "Opening Poplur" : messages[Int(playback.elapsed / 0.85) % messages.count])
                         .font(.system(size: 20, weight: .heavy, design: .rounded))
                         .foregroundStyle(LinearGradient(colors: [Color(red: 1, green: 0.54, blue: 0.77), .pink, Color(red: 1, green: 0.94, blue: 0.98)], startPoint: .leading, endPoint: .trailing))
                         .lineLimit(1).minimumScaleFactor(0.7)
                         .shadow(color: Color(red: 0.96, green: 0.23, blue: 0.6).opacity(0.5), radius: 12)
-                    ClaySplashProgress(progress: playback.progress, stripeOffset: reduceMotion ? 0 : playback.elapsed * 30)
+                    ClaySplashProgress(progress: playback.progress, stripeOffset: reduceMotion ? 0 : -playback.elapsed * 62 / 0.7)
                 }
                 .frame(width: min(215, proxy.size.width * 0.58))
                 .position(x: proxy.size.width / 2, y: proxy.size.height * 0.68)
@@ -79,7 +79,9 @@ struct NativePreloginSplash: View {
         .onAppear { playback.setActive(phase == .active); finishIfReady() }
         .onChange(of: phase) { _, phase in playback.setActive(phase == .active); finishIfReady() }
         .onChange(of: playback.hasFinished) { _, _ in finishIfReady() }
-        .onDisappear { playback.stop() }
+        // A temporary SwiftUI disappearance must not destroy the StateObject's
+        // player item; the same view can appear again during auth restoration.
+        .onDisappear { playback.setActive(false) }
     }
 
     private func finishIfReady() {
@@ -95,28 +97,34 @@ private struct ClaySplashProgress: View {
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .leading) {
-                Capsule().fill(Color(red: 0.19, green: 0.03, blue: 0.1).gradient)
+                Capsule().fill(Color(red: 28 / 255, green: 8 / 255, blue: 18 / 255).opacity(0.55))
+                    .overlay(Capsule().stroke(.black.opacity(0.5), lineWidth: 2).blur(radius: 2).offset(y: 2).clipShape(Capsule()))
                 Canvas { context, size in
-                    context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color(red: 1, green: 0.52, blue: 0.77)))
-                    for x in stride(from: -40 + stripeOffset.truncatingRemainder(dividingBy: 40), to: size.width + 40, by: 40) {
-                        let path = Path { p in
-                            p.move(to: CGPoint(x: x, y: 0)); p.addLine(to: CGPoint(x: x + 20, y: 0))
-                            p.addLine(to: CGPoint(x: x + 34, y: size.height)); p.addLine(to: CGPoint(x: x + 14, y: size.height)); p.closeSubpath()
+                    // Restore the original three-colour, 45-degree clay bands.
+                    let colours = [Color(red: 1, green: 225 / 255, blue: 241 / 255), Color(red: 1, green: 134 / 255, blue: 196 / 255), Color(red: 245 / 255, green: 60 / 255, blue: 153 / 255)]
+                    for x in stride(from: -62 + stripeOffset.truncatingRemainder(dividingBy: 62), to: size.width + 62, by: 62) {
+                        for index in 0..<3 {
+                            let left = x + Double(index) * 62 / 3
+                            let right = left + 62 / 3
+                            let path = Path { p in
+                                p.move(to: CGPoint(x: left, y: 0)); p.addLine(to: CGPoint(x: right, y: 0))
+                                p.addLine(to: CGPoint(x: right + size.height, y: size.height)); p.addLine(to: CGPoint(x: left + size.height, y: size.height)); p.closeSubpath()
+                            }
+                            context.fill(path, with: .color(colours[index]))
                         }
-                        context.fill(path, with: .color(Color(red: 1, green: 0.88, blue: 0.94)))
                     }
                 }
                 .overlay(LinearGradient(stops: [.init(color: .white.opacity(0.65), location: 0), .init(color: .clear, location: 0.35), .init(color: .pink.opacity(0.3), location: 0.6), .init(color: Color(red: 0.55, green: 0.07, blue: 0.29).opacity(0.8), location: 1)], startPoint: .top, endPoint: .bottom))
                 .clipShape(Capsule())
-                .frame(width: max(14, proxy.size.width * progress))
+                .frame(width: max(9, proxy.size.width * min(1, max(0, progress))))
                 .overlay(alignment: .top) {
                     Capsule().fill(.white.opacity(0.55)).frame(height: 2).padding(.horizontal, 6).padding(.top, 2)
                 }
             }
-            .overlay(Capsule().strokeBorder(.pink.opacity(0.6), lineWidth: 1))
-            .shadow(color: .black.opacity(0.5), radius: 2, y: 3)
-            .shadow(color: .pink.opacity(0.25), radius: 8)
-        }.frame(height: 14)
+            .clipShape(Capsule())
+            .overlay(Capsule().strokeBorder(.pink.opacity(0.35), lineWidth: 1))
+            .shadow(color: .pink.opacity(0.32), radius: 8)
+        }.frame(height: 9)
     }
 }
 

@@ -18,31 +18,36 @@ rules_version = '2';
 // folder is an unmetered file host that happens to require a login.
 service firebase.storage {
   match /b/{bucket}/o {
+    function activeAccount() {
+      return request.auth != null
+        && !firestore.exists(/databases/(default)/documents/accountDeletions/$(request.auth.uid));
+    }
+
 
     // music/{uid}/{trackId}.{ext} — one object per track, named by the same id
     // the Firestore row carries, so a row and its audio can never drift apart.
     match /music/{userId}/{trackId} {
-      allow read: if request.auth != null;
+      allow read: if activeAccount();
 
       // 25MB is a generous ceiling for a track at streaming bitrates and a
       // hard stop for anything that is not one. contentType is checked on the
       // way IN because it is what the player will trust on the way out.
-      allow create, update: if request.auth != null
+      allow create, update: if activeAccount()
         && request.auth.uid == userId
         && request.resource.size < 25 * 1024 * 1024
         && request.resource.contentType.matches('audio/.*');
 
-      allow delete: if request.auth != null && request.auth.uid == userId;
+      allow delete: if activeAccount() && request.auth.uid == userId;
     }
 
     // Cover art for a track. Small, image-only, same ownership rule.
     match /musicArt/{userId}/{trackId} {
-      allow read: if request.auth != null;
-      allow create, update: if request.auth != null
+      allow read: if activeAccount();
+      allow create, update: if activeAccount()
         && request.auth.uid == userId
         && request.resource.size < 3 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
-      allow delete: if request.auth != null && request.auth.uid == userId;
+      allow delete: if activeAccount() && request.auth.uid == userId;
     }
 
     // profile_selfies/{uid}.{ext} and profile_pictures/{uid}.{ext} — one object
@@ -60,18 +65,18 @@ service firebase.storage {
     // this bucket is the app's default one and read access here is a decision
     // about user uploads, not about art.
     match /profile_pictures/{fileName} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null
+      allow read: if activeAccount();
+      allow write: if activeAccount()
         && fileName.split('\\.')[0] == request.auth.uid
         && request.resource.size < 8 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
     }
 
     match /profile_selfies/{fileName} {
-      allow read: if request.auth != null;
+      allow read: if activeAccount();
       // 40MB: the app exports a ten-second clip, and a short selfie video at
       // phone bitrates lands far under this while a full library video does not.
-      allow write: if request.auth != null
+      allow write: if activeAccount()
         && fileName.split('\\.')[0] == request.auth.uid
         && request.resource.size < 40 * 1024 * 1024
         && request.resource.contentType.matches('video/.*');
@@ -93,7 +98,7 @@ service firebase.storage {
     // radius is a product rule about reach, not a secrecy boundary, and the
     // same reasoning already governs music above.
     match /posts/{userId}/{fileName} {
-      allow read: if request.auth != null;
+      allow read: if activeAccount();
 
       // Split by kind rather than one ceiling for both. The clip is exported
       // with AVAssetExportPresetHighestQuality and carries no duration cap, so
@@ -101,7 +106,7 @@ service firebase.storage {
       // reject real videos or leave images effectively unbounded. contentType
       // is checked on the way IN because it is what the feed trusts on the way
       // out — both platforms set it explicitly (video/mp4, image/jpeg).
-      allow create, update: if request.auth != null
+      allow create, update: if activeAccount()
         && request.auth.uid == userId
         && (
           (request.resource.contentType.matches('video/.*')
@@ -110,7 +115,7 @@ service firebase.storage {
             && request.resource.size < 12 * 1024 * 1024)
         );
 
-      allow delete: if request.auth != null && request.auth.uid == userId;
+      allow delete: if activeAccount() && request.auth.uid == userId;
     }
 
     // Private direct-message media. Unlike posts and music, this is not a
@@ -119,7 +124,7 @@ service firebase.storage {
     // independently enforceable without trusting object metadata.
     match /dmMedia/{threadId}/{userId}/{fileName} {
       function inThread() {
-        return request.auth != null
+        return activeAccount()
           && request.auth.uid in firestore.get(
             /databases/(default)/documents/dmThreads/$(threadId)
           ).data.participants;

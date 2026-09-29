@@ -62,6 +62,8 @@ enum PoplurProfileBackfill {
         let users = Firestore.firestore().collection("users").document(uid)
         let existing = (try? await users.getDocument())?.data() ?? [:]
 
+        guard existing["profileMediaRemoved"] as? Bool != true else { return }
+
         func missing(_ key: String) -> Bool {
             let value = existing[key] as? String
             return value == nil || value?.isEmpty == true
@@ -69,6 +71,18 @@ enum PoplurProfileBackfill {
 
         if missing("profileSelfieVideoURL") { await backfillSelfieVideo(uid: uid, users: users) }
         if missing("profilePictureURL") { await backfillPhoto(uid: uid, users: users) }
+    }
+
+    private static func saveUnlessRemoved(users: DocumentReference, field: String, url: String) async throws {
+        _ = try await Firestore.firestore().runTransaction { transaction, errorPointer in
+            do {
+                let data = try transaction.getDocument(users).data() ?? [:]
+                guard data["profileMediaRemoved"] as? Bool != true,
+                      (data[field] as? String)?.isEmpty != false else { return nil }
+                transaction.setData([field: url], forDocument: users, merge: true)
+            } catch { errorPointer?.pointee = error as NSError }
+            return nil
+        }
     }
 
     /// The profile photo has the identical shape to the selfie: written to
@@ -85,7 +99,7 @@ enum PoplurProfileBackfill {
             let reference = Storage.storage().reference().child("profile_pictures/\(uid).jpg")
             _ = try await reference.putDataAsync(data, metadata: PoplurProfileUpload.imageMetadata())
             let downloadURL = try await reference.downloadURL()
-            try await users.setData(["profilePictureURL": downloadURL.absoluteString], merge: true)
+            try await saveUnlessRemoved(users: users, field: "profilePictureURL", url: downloadURL.absoluteString)
             PoplurDiagLog.append("[PoplurProfile] backfilled photo for \(uid.prefix(8))")
         } catch {
             PoplurDiagLog.append("[PoplurProfile] photo backfill FAILED: \(error.localizedDescription)")
@@ -110,10 +124,7 @@ enum PoplurProfileBackfill {
                 metadata: PoplurProfileUpload.videoMetadata(forExtension: ext)
             )
             let downloadURL = try await reference.downloadURL()
-            try await users.setData(
-                ["profileSelfieVideoURL": downloadURL.absoluteString],
-                merge: true
-            )
+            try await saveUnlessRemoved(users: users, field: "profileSelfieVideoURL", url: downloadURL.absoluteString)
             // Written to the diag log, not `print`: the original upload failed
             // silently for weeks precisely because its only report went to
             // stdout, where a device pull never sees it.

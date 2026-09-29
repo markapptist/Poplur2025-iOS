@@ -210,14 +210,15 @@ exports.notifyOnEngagement = (0, firestore_1.onDocumentCreated)({
                     // One thread per post, so many engagements on the same post group
                     // in Notification Center instead of stacking as unrelated banners.
                     "thread-id": postId,
-                    sound: "default",
+                    sound: "poplur_pop.wav",
                 },
             },
         },
         android: {
             priority: "high",
             notification: {
-                channelId: "poplur_alerts",
+                channelId: "poplur_alerts_pop_v2",
+                sound: "poplur_pop",
                 tag: postId,
             },
         },

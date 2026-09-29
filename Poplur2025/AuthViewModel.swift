@@ -61,7 +61,10 @@ final class AuthViewModel: ObservableObject {
         let user = Auth.auth().currentUser
         self.currentUser = user
         self.isAuthenticated = (user != nil)
-        self.isCompletingOnboarding = NativePreloginDraft.isPending(email: user?.email)
+        // A half-finished NATIVE onboarding draft can only be completed by the
+        // native pre-login; behind the web pre-login it would strand a signed-in
+        // user on Welcome (canEnterHome false, no native screen reachable).
+        self.isCompletingOnboarding = !PoplurPreloginWeb.isEnabled && NativePreloginDraft.isPending(email: user?.email)
 
         // Listen for auth state changes (also fires once immediately to confirm cached state).
         authHandle = Auth.auth().addStateDidChangeListener { [weak self] _, user in
@@ -69,7 +72,7 @@ final class AuthViewModel: ObservableObject {
             Task { @MainActor in
                 self.currentUser = user
                 self.isAuthenticated = (user != nil)
-                if NativePreloginDraft.isPending(email: user?.email) { self.isCompletingOnboarding = true }
+                if !PoplurPreloginWeb.isEnabled, NativePreloginDraft.isPending(email: user?.email) { self.isCompletingOnboarding = true }
                 self.isResolvingAuthState = false
                 // FCM issues this device's token independently of auth, and on a
                 // fresh install it lands FIRST — so the delegate has no uid to

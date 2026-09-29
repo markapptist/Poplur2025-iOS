@@ -183,42 +183,46 @@ account.addAccountClaimRadius(writer, owner, account.claimRadiusDeltaMeters(
 assert.equal(writer.total(owner), 0, "an account whose posts earned nothing back is entitled to nothing");
 
 // ── The ceiling the create rule enforces ─────────────────────────────────
+// Earned once, spent once: the discovery seed plus (earned − committed).
 const SEED = account.POST_DISCOVERY_SEED_METERS;
-assert.equal(account.maxSeedRadiusMeters(0, true), SEED,
+assert.equal(account.maxSeedRadiusMeters(0, 0), SEED,
   "an account that has earned nothing may still publish into the discovery seed");
-assert.equal(account.maxSeedRadiusMeters(72_800, true), 72_800 + SEED,
+assert.equal(account.maxSeedRadiusMeters(72_800, 0), 72_800 + SEED,
   "an account holding 72.8 km may claim 72.8 km, which is the point of the 6 Sep change");
-assert.equal(account.maxSeedRadiusMeters(-5_000, true), SEED,
+assert.equal(account.maxSeedRadiusMeters(72_800, 72_800), SEED,
+  "a claim already sitting on a live pop cannot be claimed again");
+assert.equal(account.maxSeedRadiusMeters(72_800, 20_000), 52_800 + SEED,
+  "what is out on other pops comes off the allowance");
+assert.equal(account.maxSeedRadiusMeters(10_000, 50_000), SEED,
+  "more committed than earned (decayed earnings) is the seed, never negative");
+assert.equal(account.maxSeedRadiusMeters(-5_000, 0), SEED,
   "a drifted negative aggregate reads as zero, never as a negative ceiling");
-assert.equal(account.maxSeedRadiusMeters(null, true), SEED,
-  "once the backfill is marked complete, absent means zero");
-assert.equal(account.maxSeedRadiusMeters(null, false), account.LEGACY_DROP_CEILING_METERS + SEED,
-  "mid-backfill an account with no total keeps the ceiling it had yesterday");
-assert.equal(account.maxSeedRadiusMeters(72_800, false), 72_800 + SEED,
-  "the migration fallback is a floor, never a cap on an account that is already summed");
-assert.equal(account.maxSeedRadiusMeters(9_000_000, true), 6_371_000,
+assert.equal(account.maxSeedRadiusMeters(null, null), SEED,
+  "absent means zero — there is no migration fallback any more");
+assert.equal(account.maxSeedRadiusMeters(9_000_000, 0), 6_371_000,
   "the planet is still the outer bound");
 
 // ── The rule and this module say the same thing ──────────────────────────
 // The numbers above are duplicated into firestore.rules by hand, because rules
 // cannot import. Read them back so a change to one that misses the other fails
 // here rather than in production.
+const totals = require("../lib/accountTotalRadius");
 const rules = fs.readFileSync(path.join(__dirname, "..", "..", "firestore.rules"), "utf8");
 const ceilingStart = rules.indexOf("function maxSeedRadiusMeters(");
 assert.ok(ceilingStart > 0, "firestore.rules still defines the ceiling this module mirrors");
 const ceiling = rules.slice(ceilingStart, rules.indexOf("}", ceilingStart));
-assert.ok(
-  rules.includes(`get('${account.ACCOUNT_CLAIM_RADIUS_FIELD}', 0)`),
-  "the rule reads the same aggregate field the server maintains",
-);
-assert.ok(
-  ceiling.includes(`: ${account.LEGACY_DROP_CEILING_METERS}`),
-  "the rule's migration fallback matches LEGACY_DROP_CEILING_METERS",
-);
-assert.ok(
-  ceiling.includes(`+ ${account.POST_DISCOVERY_SEED_METERS}`),
-  "the rule adds the same discovery seed",
-);
+assert.ok(ceiling.includes(`'${totals.ACCOUNT_EARNED_CLAIM_FIELD}'`),
+  "the rule reads the earned sum the trigger maintains");
+assert.ok(ceiling.includes(`'${totals.ACCOUNT_COMMITTED_CLAIM_FIELD}'`),
+  "and subtracts the committed sum the trigger maintains");
+assert.ok(!ceiling.includes(totals.ACCOUNT_TOTAL_RADIUS_FIELD),
+  "the profile's full-radius sum grants nothing — that was the ladder");
+assert.ok(ceiling.includes(`+ ${account.POST_DISCOVERY_SEED_METERS}`),
+  "the rule adds the same discovery seed");
+for (const field of [totals.ACCOUNT_EARNED_CLAIM_FIELD, totals.ACCOUNT_COMMITTED_CLAIM_FIELD,
+  ...Object.values(totals.POST_RATE_FIELDS)]) {
+  assert.ok(rules.includes(`'${field}'`), `the fence names ${field}`);
+}
 assert.ok(
   rules.includes("serverOwnedAccountRadiusFields"),
   "the aggregate is fenced from the account that owns the document it lives on",

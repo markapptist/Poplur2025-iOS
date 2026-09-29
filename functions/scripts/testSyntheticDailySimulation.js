@@ -7,6 +7,7 @@ const {SYNTHETIC_BETA_PROFILES} = require('../lib/syntheticBetaCohort');
 const {runRadiusDecay}=require('../lib/radiusDecay');
 (async()=>{
 const db=admin.firestore();
+await db.doc('testControl/radiusDecayTrial').delete(); // Keep the retention fixture independent of other emulator suites.
 await db.doc('testControl/syntheticDailySimulation').set({enabled:true,ownerUid:'owner'});
 await db.doc('testControl/syntheticBrowserRunner').set({enabled:true});
 for (const profile of SYNTHETIC_BETA_PROFILES) {await admin.auth().createUser({uid:profile.id});await db.doc('users/'+profile.id).set({username:profile.id,syntheticBeta:true});}
@@ -34,5 +35,13 @@ assert.equal(decayHistory.radiusMeters,decayed.radiusMeters);
 assert((await db.collection('testRetentionDecaySlots').get()).size>0);
 const next=await runSyntheticDailySimulation(now+86400000);assert.equal(next.testers,12);assert.equal(next.dailyPostTarget,288);
 assert.equal((await db.collection('testDailySimulationActors').get()).size,4);
+// Disabling the optional owner target must leave people alone while the
+// cohort still exercises production posting/engagement/radius transactions.
+await db.doc('testControl/syntheticDailySimulation').update({ownerUid:''});
+const ownerBefore=(await db.doc('posts/post-owner').get()).data();
+const cohortOnly=await runSyntheticDailySimulation(now+2*86400000);
+assert.equal(cohortOnly.status,'complete');assert(cohortOnly.engagementsThisAttempt>0);
+assert.deepEqual((await db.doc('posts/post-owner').get()).data(),ownerBefore);
+console.log('Cohort-only simulation: real owner receives no synthetic writes; test accounts still engage');
 console.log('hourly retention simulation emulator: PASS (new content each hour, same-slot retry deduped, seed/earned decay, comments retained)');
 })().catch(e=>{console.error(e);process.exitCode=1});

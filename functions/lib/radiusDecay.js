@@ -48,9 +48,9 @@ if (admin.apps.length === 0)
 const db = admin.firestore();
 /**
  * Radius is a score you defend, not a stat you keep: organic radius halves in
- * ~13.5 days untouched (RADIUS_DECAY_PER_DAY, elapsed-time based so missed
- * runs catch up). The 5x all-user trial includes legacy demo reach stored
- * in the boost component, starting at its explicit activation time.
+ * at the configured half-life (elapsed-time based so missed runs catch up).
+ * The all-user trial includes seed and legacy demo reach from their explicit
+ * activation times; a half-life change applies only after its own activation.
  *
  * The decay clock is `decayedAt`, written ONLY here: a post without one gets
  * a baseline stamp and no decay, so decay accrues purely between server
@@ -101,6 +101,20 @@ async function runRadiusDecay(nowMillis = Date.now(), dueReferences) {
                 return;
             }
             const post = snapshot.data() ?? {};
+            // The 29 officialContent posts are the map's floor: world-radius ambient
+            // content so a viewer anywhere on Earth sees something on first open. On
+            // 20 Sep 2026 the all-users decay trial (x10, 3 h half-life) zeroed every
+            // one of them at 21:29Z and expired them 'radius-zero', which is why a
+            // phone outside the synthetic cohort's few square kilometres showed a bare
+            // map. The seed layer is not user reach and must not decay; real pops keep
+            // decaying exactly as before.
+            if (post.officialContent === true) {
+                if (queue?.exists)
+                    transaction.delete(queueRef);
+                return;
+            }
+            const trial = decayTrial.data()?.enabled === true ? decayTrial.data() : undefined;
+            const createdAtMillis = snapshot.createTime.toMillis();
             // Queue advancement is atomic with the decay/history/account delta.
             // Retries see a future deadline and cannot debit the same hour twice.
             if (dueReferences) {
@@ -109,7 +123,10 @@ async function runRadiusDecay(nowMillis = Date.now(), dueReferences) {
                     transaction.delete(queueRef);
                     return;
                 }
-                transaction.update(queueRef, { dueAt: firestore_1.Timestamp.fromMillis(nowMillis + 3600_000) });
+                const deadline = (0, postEngagementPolicy_1.radiusInactivityDeadline)(post, trial, createdAtMillis);
+                const nextDue = deadline != null && deadline > nowMillis
+                    ? Math.min(nowMillis + 3600_000, deadline) : nowMillis + 3600_000;
+                transaction.update(queueRef, { dueAt: firestore_1.Timestamp.fromMillis(nextDue) });
             }
             if (post.decayedAt == null) {
                 transaction.update(ref, { decayedAt: nowTimestamp });
@@ -117,14 +134,12 @@ async function runRadiusDecay(nowMillis = Date.now(), dueReferences) {
                 return;
             }
             const ownerUid = (0, accountRadius_1.postOwnerUid)(post);
-            const trial = decayTrial.data()?.enabled === true ? decayTrial.data() : undefined;
             const stressDecay = stressEnabled && !trial ? (0, syntheticRetentionPolicy_1.calculateSyntheticRetentionDecay)(post, nowMillis) : null;
-            const next = stressDecay ?? (0, postEngagementPolicy_1.calculateRadiusDecay)(post, nowMillis, undefined, trial);
+            const next = stressDecay ?? (0, postEngagementPolicy_1.calculateRadiusDecay)(post, nowMillis, undefined, trial, createdAtMillis);
             if (!next)
                 return;
             const before = (0, postEngagementPolicy_1.postRadiusParts)(post, nowMillis);
-            const validTrial = trial && Number.isFinite(trial.multiplier) && trial.multiplier >= 1 && trial.multiplier <= 10
-                && Number.isFinite(trial.effectiveAtMillis) && nowMillis >= trial.effectiveAtMillis ? trial : undefined;
+            const rates = (0, postEngagementPolicy_1.radiusDecayRates)(nowMillis, trial);
             transaction.update(ref, {
                 organicRadiusMeters: next.organicRadiusMeters,
                 ...('boostedRadiusMeters' in next ? { boostedRadiusMeters: next.boostedRadiusMeters } : {}),
@@ -136,10 +151,9 @@ async function runRadiusDecay(nowMillis = Date.now(), dueReferences) {
                 // Display-only projection contract. Clients can show the continuous
                 // curve between durable server updates without writing radius back.
                 radiusDecayAnchorMillis: stressDecay ? 0 : nowMillis,
-                radiusDecayOrganicPerDay: 1 - Math.pow(1 - postEngagementPolicy_1.RADIUS_DECAY_PER_DAY, validTrial?.multiplier ?? 1),
-                radiusDecaySeedPerDay: validTrial ? 1 - Math.pow(1 - postEngagementPolicy_1.RADIUS_DECAY_PER_DAY, validTrial.multiplier) : 0,
-                radiusDecayBoostPerDay: validTrial?.boostedEffectiveAtMillis && nowMillis >= validTrial.boostedEffectiveAtMillis
-                    ? 1 - Math.pow(1 - postEngagementPolicy_1.RADIUS_DECAY_PER_DAY, validTrial.multiplier) : 0,
+                radiusDecayOrganicPerDay: rates.organic,
+                radiusDecaySeedPerDay: rates.seed,
+                radiusDecayBoostPerDay: rates.boost,
                 updatedAt: firestore_1.FieldValue.serverTimestamp(),
             });
             // Entitlement is the sum of what an account's posts have earned, so
@@ -173,7 +187,7 @@ async function runRadiusDecay(nowMillis = Date.now(), dueReferences) {
     console.log(`[radiusDecay] ${decayed} decayed, ${stamped} baseline-stamped, ${references.size} candidates`);
     return { decayed, stamped, candidates: references.size };
 }
-exports.radiusDecay = (0, scheduler_1.onSchedule)({ schedule: "every 60 minutes", region: "us-central1", timeoutSeconds: 300, memory: "256MiB" }, async () => {
+exports.radiusDecay = (0, scheduler_1.onSchedule)({ schedule: "every 60 minutes", region: "us-central1", timeoutSeconds: 300, memory: "256MiB", cpu: "gcf_gen1", concurrency: 1, maxInstances: 1 }, async () => {
     // The old hourly sweep is only the rollback path during migration.
     if ((await db.doc('mapDiscovery/config').get()).data()?.dueDecayEnabled === true)
         return;

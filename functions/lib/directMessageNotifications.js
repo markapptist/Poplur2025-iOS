@@ -129,14 +129,15 @@ exports.notifyOnDirectMessage = (0, firestore_2.onDocumentCreated)({
             payload: {
                 aps: {
                     "thread-id": threadId,
-                    sound: "default",
+                    sound: "poplur_pop.wav",
                 },
             },
         },
         android: {
             priority: "high",
             notification: {
-                channelId: "poplur_alerts",
+                channelId: "poplur_alerts_pop_v2",
+                sound: "poplur_pop",
                 tag: threadId,
                 clickAction: "com.apptists.poplur2025.OPEN_DM",
             },

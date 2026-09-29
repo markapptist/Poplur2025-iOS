@@ -94,8 +94,8 @@ exports.notifyOnRadiusLoss = (0, firestore_2.onDocumentCreated)({ document: 'pos
         const result = await admin.messaging().sendEachForMulticast({
             tokens: batch, notification: { title: notification.title, body: notification.body },
             data: { postId, historyId, notificationId, kind: 'decrease', radiusDeltaMeters: String(notification.delta) },
-            apns: { payload: { aps: { 'thread-id': postId, sound: 'default' } } },
-            android: { priority: 'high', notification: { channelId: 'poplur_alerts', tag: postId } },
+            apns: { payload: { aps: { 'thread-id': postId, sound: 'poplur_pop.wav' } } },
+            android: { priority: 'high', notification: { channelId: 'poplur_alerts_pop_v2', sound: 'poplur_pop', tag: postId } },
         });
         for (let i = 0; i < result.responses.length; i++) {
             if (['messaging/registration-token-not-registered', 'messaging/invalid-registration-token'].includes(result.responses[i].error?.code || '')) {

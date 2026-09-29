@@ -8,7 +8,7 @@ const db = admin.firestore();
   ]);
   const ids = [...new Set([...posts.docs, ...receipts.docs].map(d => d.id))];
   for (let i = 0; i < ids.length; i += 8) {
-    await Promise.all(ids.slice(i, i + 8).map(id => reconcileAccountPostRadius(db, id)));
+    await Promise.all(ids.slice(i, i + 8).map(id => reconcileAccountPostRadius(db, id, { countPostRate: false })));
   }
-  console.log(`Reconciled full post radius for ${ids.length} posts/receipts.`);
+  console.log(`Reconciled total, earned and committed radius for ${ids.length} posts/receipts (post-rate windows untouched).`);
 })().catch(error => { console.error(error); process.exitCode = 1; });

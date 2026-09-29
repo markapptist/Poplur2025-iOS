@@ -307,7 +307,7 @@ function decodeCursor(cursor, fingerprint) {
     }
 }
 /** Only a whitelist leaves the server; documents/ranking identities never do. */
-const PUBLIC_FIELDS = ['userID', 'userId', 'username', 'handle', 'displayName', 'latitude', 'longitude', 'radiusMeters', 'radius', 'organicRadiusMeters', 'mediaURL', 'playbackURL', 'posterURL', 'mediaType', 'caption', 'profilePictureURL', 'avatarURL', 'avatarUrl', 'photoURL', 'place', 'locationName', 'channel', 'channelId', 'channelID', 'viewCount', 'repeatViewCount', 'likeCount', 'upvoteCount', 'dislikeCount', 'downvoteCount', 'profileVisitCount', 'pinColor', 'commentCount', 'viewDurationSeconds', 'maxViewSeconds', 'isVerified', 'verified', 'trophyColor'];
+const PUBLIC_FIELDS = ['userID', 'userId', 'username', 'handle', 'displayName', 'latitude', 'longitude', 'radiusMeters', 'radius', 'organicRadiusMeters', 'mediaURL', 'playbackURL', 'posterURL', 'mediaType', 'caption', 'contentType', 'messageCard', 'profilePictureURL', 'avatarURL', 'avatarUrl', 'photoURL', 'place', 'locationName', 'channel', 'channelId', 'channelID', 'viewCount', 'repeatViewCount', 'likeCount', 'upvoteCount', 'dislikeCount', 'downvoteCount', 'profileVisitCount', 'pinColor', 'commentCount', 'viewDurationSeconds', 'maxViewSeconds', 'isVerified', 'verified', 'trophyColor'];
 async function hydrateMapCandidates(candidates, uid, includeTest, now = Date.now()) {
     const unique = [...new Map(candidates.slice(0, mapDiscoveryPolicy_1.MAX_MAP_FEATURES).map(c => [c.postId, c])).values()];
     if (!unique.length)

@@ -22,7 +22,10 @@ export async function reconcileDecayPost(postId:string) {
     const data=post.data()||{};
     if(!post.exists || !needsDecay(data)) {if(queue.exists)tx.delete(ref);return;}
     const due=millis(data.decayedAt) ? millis(data.decayedAt)+3600_000 : 0;
-    if(queue.exists && millis(queue.data()?.dueAt)===due) return;
+    const existingDue=millis(queue.data()?.dueAt);
+    // The worker can schedule the inactivity deadline before the next hourly
+    // tick. A post-change trigger must not push that deadline back an hour.
+    if(queue.exists && (existingDue===due || (existingDue>millis(data.decayedAt) && existingDue<due))) return;
     tx.set(ref,{shard:decayShard(postId),dueAt:Timestamp.fromMillis(due)});
   });
 }

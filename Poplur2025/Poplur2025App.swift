@@ -190,11 +190,15 @@ struct Poplur2025App: App {
     @StateObject private var stripeCoordinator = StripeTransitionCoordinator()
     @StateObject private var deviceVolumeObserver = DeviceVolumeObserver()
     @StateObject private var preLoginMusic = PreLoginMusicPlayer()
+    /// Pre-login is the approved web flow (PreloginWebView), matching the web
+    /// version. It plays its own radio, so the native pre-login music stays off.
+    private let usePreloginWebEmbed = PoplurPreloginWeb.isEnabled
     @State private var showAuthTransition = false
     @State private var isAuthenticatedHomeReady = false
     @State private var authTransitionToken = 0
     @State private var isWelcomePanelVisible = true
     @State private var showSplash: Bool
+    @State private var coldSplashPlaybackFinished = false
     @State private var authTransitionPlaybackFinished = false
     @Environment(\.scenePhase) private var scenePhase
 
@@ -202,7 +206,7 @@ struct Poplur2025App: App {
     /// not during the brief auth-resolving spinner, so returning signed-in users never hear
     /// a momentary blip of music before landing on HomeView.
     private var isPreLoginVisible: Bool {
-        !auth.canEnterHome && !auth.isResolvingAuthState
+        !showSplash && !auth.canEnterHome && !auth.isResolvingAuthState
     }
 
     init() {
@@ -282,14 +286,14 @@ struct Poplur2025App: App {
                 auth.signOut()
             }
             .onChange(of: isPreLoginVisible) { _, isVisible in
-                if isVisible && !showSplash && scenePhase == .active {
+                if isVisible && !showSplash && scenePhase == .active && !usePreloginWebEmbed {
                     preLoginMusic.start()
                 } else {
                     preLoginMusic.stop()
                 }
             }
             .onChange(of: showSplash) { _, splashing in
-                if !splashing && isPreLoginVisible && scenePhase == .active {
+                if !splashing && isPreLoginVisible && scenePhase == .active && !usePreloginWebEmbed {
                     preLoginMusic.start()
                 }
             }
@@ -319,7 +323,7 @@ struct Poplur2025App: App {
                 case .active:
                     PoplurPerformanceManager.shared.setApplicationLifecycle(.active)
                     PoplurBackgroundResourceFence.shared.enterForeground()
-                    if isPreLoginVisible && !showSplash && scenePhase == .active {
+                    if isPreLoginVisible && !showSplash && scenePhase == .active && !usePreloginWebEmbed {
                         preLoginMusic.start()
                     }
                 @unknown default:
@@ -327,7 +331,7 @@ struct Poplur2025App: App {
                 }
             }
             .onAppear {
-                if isPreLoginVisible && !showSplash && scenePhase == .active {
+                if isPreLoginVisible && !showSplash && scenePhase == .active && !usePreloginWebEmbed {
                     preLoginMusic.start()
                 }
                 // Sample notification authorization early: the Home URL is
@@ -364,7 +368,7 @@ struct Poplur2025App: App {
     @ViewBuilder
     private var authenticatedContent: some View {
         ZStack {
-            if auth.canEnterHome && !auth.isResolvingAuthState {
+            if auth.canEnterHome && !auth.isResolvingAuthState && (!showSplash || coldSplashPlaybackFinished) {
                 ZStack {
                     if PoplurWebHome.isEnabled {
                         // Phase 3: the APPROVED web home (poplur-clay-map ViewHarness
@@ -431,6 +435,19 @@ struct Poplur2025App: App {
                     await PoplurNotificationCenter.shared.refreshDailyNotificationForCurrentUser()
                     WatchRadiusSync.shared.refreshAndSendRadius()
                 }
+            } else if usePreloginWebEmbed && !auth.isResolvingAuthState && (!showSplash || coldSplashPlaybackFinished) {
+                // The approved web pre-login (PreloginWeb/, built from the Good Copy
+                // flow), the same screens as the web version. After the cold-launch
+                // clip it opens straight on Welcome beneath the held final frame and
+                // lifts the splash once Welcome has loaded; after a sign-out it opens
+                // on the web splash as before.
+                PreloginWebView(auth: auth, startAtWelcome: showSplash, onWelcomeLoaded: {
+                    if coldSplashPlaybackFinished { dismissColdSplash() }
+                })
+                    .ignoresSafeArea(.container, edges: .all)
+                    .overlay(SystemVolumeHUDSuppressor())
+                    .volumeBarsOverlay()
+                    .transition(.opacity)
             } else if !showSplash && !auth.isResolvingAuthState {
                 NativePreloginView()
                     .ignoresSafeArea(.container, edges: .all)
@@ -439,11 +456,25 @@ struct Poplur2025App: App {
                     .volumeBarsOverlay()
                     .transition(.opacity)
             }
-            // A restored session warms Home beneath the one native intro.
-            // Waiting to create Home until the video ended left a blank load gap.
+            // Start Home after the intro completes. Home's camera/feed audio
+            // startup must not interrupt the splash decoder. Hold its final
+            // frame until Home is ready, with a bounded readiness fallback.
             if showSplash || auth.isResolvingAuthState {
                 PoplurClaySplashView {
-                    withAnimation(.easeOut(duration: 0.3)) { showSplash = false }
+                    coldSplashPlaybackFinished = true
+                    if !auth.canEnterHome && !usePreloginWebEmbed { dismissColdSplash() }
+                    else {
+                        // Signed in: Home warms beneath the held frame, bounded at
+                        // 3 s. Signed out on the web pre-login: Welcome itself lifts
+                        // the splash once loaded (onWelcomeLoaded), because the
+                        // WebKit process only starts now and a 3 s bound lifted onto
+                        // an unpainted, near-black web view on a cold phone. The 10 s
+                        // here is only the failsafe so nobody is stranded.
+                        let bound: Double = auth.canEnterHome ? 3 : 10
+                        DispatchQueue.main.asyncAfter(deadline: .now() + bound) {
+                            if coldSplashPlaybackFinished { dismissColdSplash() }
+                        }
+                    }
                 }.environmentObject(auth).ignoresSafeArea().transition(.opacity).zIndex(200)
             }
         }
@@ -488,7 +519,12 @@ struct Poplur2025App: App {
     private func markAuthenticatedHomeReady() {
         guard auth.isAuthenticated else { return }
         isAuthenticatedHomeReady = true
+        if coldSplashPlaybackFinished { dismissColdSplash() }
         finishAuthTransitionIfReady()
+    }
+
+    private func dismissColdSplash() {
+        withAnimation(.easeOut(duration: 0.3)) { showSplash = false }
     }
 
     private func finishAuthTransitionIfReady() {
