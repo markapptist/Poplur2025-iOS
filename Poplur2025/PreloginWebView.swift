@@ -154,6 +154,55 @@ struct PreloginWebView: UIViewRepresentable {
         })();
         """#
 
+    /// Give the existing approved Forgot control its native Firebase action.
+    /// The bundled page stays intact, including its alert presentation.
+    static let passwordResetScript = #"""
+        (function () {
+          var button = document.querySelector('#paneSignIn .forgotBtn')
+          var emailField = document.querySelector('#paneSignIn .fieldMail')
+          if (!button || !emailField || button.dataset.passwordResetBound) return
+          button.dataset.passwordResetBound = '1'
+          var pending = null, timeout = null
+          var label = button.textContent
+          function notice(message, title) {
+            if (window.__poplurShowAlert) window.__poplurShowAlert(message, title)
+          }
+          function finish(message, title) {
+            clearTimeout(timeout)
+            pending = null
+            button.disabled = false
+            button.textContent = label
+            notice(message, title)
+          }
+          window.poplurPasswordResetResult = function (result) {
+            if (!pending || !result || result.requestId !== pending) return
+            finish(result.ok
+              ? 'If this email has an account, a password reset link will arrive shortly.'
+              : result.error || 'Could not send the reset email. Please try again.',
+              result.ok ? 'Check your email' : 'Hold on!')
+          }
+          button.addEventListener('click', function () {
+            if (pending) return
+            var email = emailField.value.trim()
+            if (!email || !emailField.checkValidity()) {
+              notice('Enter your email address first.', 'Hold on!')
+              emailField.focus()
+              return
+            }
+            var bridge = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.poplur
+            if (!bridge) { notice('Could not send the reset email. Please try again.', 'Hold on!'); return }
+            pending = String(Date.now()) + '-' + Math.random().toString(36).slice(2)
+            button.disabled = true
+            button.textContent = 'SENDING…'
+            timeout = setTimeout(function () {
+              finish('Could not confirm the reset email. Check your inbox before trying again.', 'Hold on!')
+            }, 30000)
+            try { bridge.postMessage({ action: 'resetPassword', email: email, requestId: pending }) }
+            catch (error) { finish('Could not send the reset email. Please try again.', 'Hold on!') }
+          })
+        })();
+        """#
+
     /// Pre-login is the one screen whose whole content is authored motion —
     /// the confetti shower, the clay stud world and the login cube. The shared
     /// governor (PoplurManagedWebView's bootstrap) paces every document's
@@ -290,6 +339,10 @@ struct PreloginWebView: UIViewRepresentable {
         )
         config.userContentController.addUserScript(
             WKUserScript(source: Self.hideUnwiredFaceIDButton,
+                         injectionTime: .atDocumentEnd, forMainFrameOnly: true)
+        )
+        config.userContentController.addUserScript(
+            WKUserScript(source: Self.passwordResetScript,
                          injectionTime: .atDocumentEnd, forMainFrameOnly: true)
         )
 
@@ -573,6 +626,7 @@ struct PreloginWebView: UIViewRepresentable {
 
     final class Coordinator: NSObject, WKScriptMessageHandler, UIScrollViewDelegate, WKNavigationDelegate {
         weak var webView: WKWebView?
+        private var passwordResetPending = false
         private let auth: AuthViewModel
         private let onComplete: () -> Void
         private let onWelcomeLoaded: () -> Void
@@ -822,6 +876,32 @@ struct PreloginWebView: UIViewRepresentable {
                         self?.postAuthResult(ok: true, error: nil)
                     }
                 }
+            case "resetPassword":
+                guard message.frameInfo.isMainFrame,
+                      message.frameInfo.request.url?.scheme == PoplurPreloginWeb.scheme,
+                      message.frameInfo.request.url?.host == PoplurPreloginWeb.host else { return }
+                let email = (body?["email"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let requestId = body?["requestId"] as? String ?? ""
+                guard !requestId.isEmpty, requestId.count <= 128 else { return }
+                guard !email.isEmpty, email.count <= 254 else {
+                    postPasswordResetResult(requestId: requestId, ok: false, error: "Enter your email address first.")
+                    return
+                }
+                guard !passwordResetPending else {
+                    postPasswordResetResult(requestId: requestId, ok: false, error: "A reset email is still being requested. Check your inbox before trying again.")
+                    return
+                }
+                passwordResetPending = true
+                Auth.auth().sendPasswordReset(withEmail: email) { [weak self] error in
+                    DispatchQueue.main.async {
+                        guard let self else { return }
+                        self.passwordResetPending = false
+                        // Give the same answer for an unknown account.
+                        let unknownAccount = (error as NSError?)?.code == AuthErrorCode.userNotFound.rawValue
+                        self.postPasswordResetResult(requestId: requestId, ok: error == nil || unknownAccount,
+                                                     error: unknownAccount ? nil : error?.localizedDescription)
+                    }
+                }
             case "signUp":
                 // BUG-2 fix: real Firebase account creation, mirroring
                 // SignUpView.submit(). Business-profile persistence stays Phase 3;
@@ -1053,6 +1133,17 @@ struct PreloginWebView: UIViewRepresentable {
 
         private enum ProfilePhotoPayloadError: Error {
             case invalid
+        }
+
+        private func postPasswordResetResult(requestId: String, ok: Bool, error: String?) {
+            let payload: [String: Any] = ["requestId": requestId, "ok": ok, "error": error ?? ""]
+            guard let data = try? JSONSerialization.data(withJSONObject: payload),
+                  let json = String(data: data, encoding: .utf8) else { return }
+            DispatchQueue.main.async { [weak self] in
+                self?.webView?.evaluateJavaScript(
+                    "window.poplurPasswordResetResult && window.poplurPasswordResetResult(\(json))"
+                )
+            }
         }
 
         /// Native → web auth callback. The web defines `window.poplurAuthResult`
