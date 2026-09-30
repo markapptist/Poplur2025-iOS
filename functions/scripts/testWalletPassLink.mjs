@@ -1,7 +1,8 @@
 /**
- * The link on a Wallet pass (lib/walletPass.js): the QR and the "Profile" line
+ * The link on a Wallet pass (lib/walletPass.js): the QR and the "Website" line
  * on the back must open the live poplur.ca landing page with the holder's
- * handle as ?u= — never poplur.com, which has no DNS.
+ * handle as ?u= — never poplur.com, which has no DNS — and the back's text
+ * must say that is where the code goes.
  *
  *   npm run build && node scripts/testWalletPassLink.mjs
  *
@@ -90,6 +91,10 @@ await check("a signed pass carries that link in its QR and on its back", async (
   }
   const profile = pass.generic.backFields.find(field => field.key === "profile");
   assert.equal(profile?.value, expected);
+  assert.equal(profile?.label, "Website");
+  // The words on the back describe where the code goes, not a profile page the site does not have.
+  const about = pass.generic.backFields.find(field => field.key === "about");
+  assert.match(about?.value ?? "", /Scanning the code opens poplur\.ca/);
   assert.ok(!JSON.stringify(pass).includes("poplur.com"), "the pass still names poplur.com");
 });
 

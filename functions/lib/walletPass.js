@@ -59,8 +59,8 @@ const https_1 = require("firebase-functions/v2/https");
  * It is deliberately a `generic` pass and not a `storeCard`. Apple expects a
  * pass to DO something — a purely decorative collectible reads as off-label at
  * review — so this is issued as an identity card: the holder's handle, the card
- * they own, and a QR that resolves to their profile. That also makes it useful
- * in Poplur's own terms, since a scanned card is another way to be found.
+ * they own, and a QR that opens poplur.ca with that handle in the link. That
+ * also makes it useful in Poplur's own terms, since a scanned card is a way in.
  * `generic` is also the style whose thumbnail is square (90/180/270), which is
  * exactly the posters' native 720x720 — a `storeCard` strip is a wide banner and
  * would have meant cropping the art.
@@ -335,11 +335,12 @@ async function buildCardPass(request) {
     pass.backFields.push({
         key: "about",
         label: "About",
-        value: "Your Poplur card. Scan the code to open this profile in Poplur — "
-            + "everything you post reaches the people inside your radius.",
-    }, { key: "profile", label: "Profile", value: profileURL });
+        value: "Your Poplur card. Scanning the code opens poplur.ca and its beta sign-up. "
+            + "On Poplur, every post starts nearby and travels further as people engage.",
+    }, { key: "profile", label: "Website", value: profileURL });
     // The QR is what makes this a card that DOES something rather than a picture
-    // in a wallet: someone scans it and lands on the holder's profile.
+    // in a wallet: someone scans it and lands on poplur.ca, where they can join
+    // the beta, with the holder's handle already in the link (see passProfileURL).
     pass.setBarcodes({
         message: profileURL,
         format: "PKBarcodeFormatQR",
