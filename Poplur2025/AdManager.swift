@@ -1,5 +1,6 @@
 import UIKit
 import GoogleMobileAds
+import FirebaseFirestore
 
 final class AdManager: NSObject, FullScreenContentDelegate {
     static let shared = AdManager()
@@ -52,6 +53,20 @@ final class AdManager: NSObject, FullScreenContentDelegate {
             return
         }
         hasStarted = true
+        // The server's ads switch, public/ads { enabled }. Ads are off for the beta
+        // (owner decision, 30 Sep 2026): a missing, unreadable or false switch means
+        // no ads, so they can be turned on later without shipping a new build.
+        Firestore.firestore().collection("public").document("ads").getDocument { [weak self] snapshot, error in
+            guard let self else { return }
+            guard error == nil, snapshot?.data()?["enabled"] as? Bool == true else {
+                PoplurDiagLog.append("[Ads] switched off on the server (public/ads); no ads")
+                return
+            }
+            DispatchQueue.main.async { self.startSDK() }
+        }
+    }
+
+    private func startSDK() {
         PoplurDiagLog.append("[Ads] SDK starting with configured production unit")
         // Cap the creative's Digital Content Label. Precisely: the labels are
         // ordered MA < T < PG < G, so .teen excludes ONLY the MA bucket. It is
