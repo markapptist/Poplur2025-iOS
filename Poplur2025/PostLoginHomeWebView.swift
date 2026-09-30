@@ -2066,7 +2066,10 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 if type == "shareReferral" {
                     let code = (body["code"] as? String) ?? ""
                     let link = (body["link"] as? String) ?? "https://poplur.com"
-                    let text = "Join me on Poplur — use my code \(code) and we both get credits and the whole map."
+                    // The page writes the invite (it knows where the friend enters the code);
+                    // older pages send none.
+                    let text = (body["text"] as? String).flatMap { $0.isEmpty ? nil : String($0.prefix(400)) }
+                        ?? "Join me on Poplur — use my code \(code) and we both get credits and the whole map."
                     var items: [Any] = [text]
                     if let url = URL(string: link) { items.append(url) }
                     DispatchQueue.main.async {

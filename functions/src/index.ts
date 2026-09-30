@@ -21,6 +21,7 @@ import {
 
 export { deleteMyAccount } from "./accountDeletion";
 export { verifyCardPurchase } from "./cardPurchases";
+export { poplurCredits } from "./credits";
 export { poplurWalletPass, poplurOwnedCards } from "./walletPass";
 export { poplurPassWebService, poplurPassOnProfileChange } from "./walletPassWebService";
 export { notifyOnRadiusLoss } from "./radiusLossNotifications";
