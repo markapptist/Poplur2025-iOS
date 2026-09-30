@@ -294,6 +294,17 @@ export type CardPassRequest = {
 };
 
 /**
+ * Where the QR and the back of the pass send people. poplur.com has no DNS, so
+ * this was a dead link; the live site is www.poplur.ca, which has no profile
+ * page yet. The handle rides as `?u=` on the landing page — the same shape as
+ * pop shares' `?pop=` — so a profile page can pick it up there later without
+ * re-issuing a single pass. Escaped the way every shell escapes a pop id.
+ */
+export function passProfileURL(handle: string): string {
+  return `https://www.poplur.ca/?u=${encodeURIComponent(handle.replace(/^@/, ""))}`;
+}
+
+/**
  * Builds and signs the .pkpass. Deliberately separate from the callable above
  * and free of auth, Firestore and secrets, so the pass itself — assets, fields,
  * barcode, manifest, signature — can be exercised directly in a test with a
@@ -306,7 +317,7 @@ export async function buildCardPass(request: CardPassRequest): Promise<Buffer> {
   // discovery timeout and failed the deploy outright. Pass signing is rare;
   // paying that cost on the calls that actually sign is the right trade.
   const { PKPass } = await import("passkit-generator");
-  const profileURL = `https://poplur.com/u/${request.handle.replace(/^@/, "")}`;
+  const profileURL = passProfileURL(request.handle);
 
   const pass = new PKPass({}, request.certificates, {
     passTypeIdentifier: request.passTypeIdentifier,
