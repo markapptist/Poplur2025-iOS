@@ -303,6 +303,32 @@ enum PoplurWebHome {
     }
 }
 
+/// The links a share sheet hands out, built exactly as the page builds them
+/// (profileRealtimePosts.ts `profilePostShareUrl`, referral.ts `referralLink`),
+/// so a pop or invite shared from here is the URL the page would copy.
+/// poplur.com has no DNS; the live site is www.poplur.ca.
+enum PoplurShareLink {
+    /// The characters encodeURIComponent leaves unescaped.
+    private static let uriComponentAllowed = CharacterSet(
+        charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.!~*'()"
+    )
+
+    private static func component(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: uriComponentAllowed) ?? ""
+    }
+
+    /// A pop, by its immutable post id. The site takes the id as ?pop= until
+    /// it has a page for one.
+    static func pop(_ postId: String) -> String {
+        "https://www.poplur.ca/?pop=\(component(postId))"
+    }
+
+    /// An invitation carrying the sender's code, for a page that sent no link.
+    static func referral(code: String) -> String {
+        code.isEmpty ? "https://www.poplur.ca/" : "https://www.poplur.ca/?ref=\(component(code))"
+    }
+}
+
 /// Per-process routing between the signed-out and authenticated permission
 /// primers. A signed-out user answers the approved pre-login cards; that launch
 /// must not immediately show the same cards again while auth hands off to Home.
@@ -2038,7 +2064,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     // URL over a generic/channel link supplied by the caller.
                     // Link-only surfaces such as Radio still use suppliedURL.
                     if let postId = body["postId"] as? String, !postId.isEmpty,
-                       let url = URL(string: "https://poplur.com/p/\(postId)") {
+                       let url = URL(string: PoplurShareLink.pop(postId)) {
                         items.append(url)
                     } else if let suppliedURL {
                         items.append(suppliedURL)
@@ -2065,7 +2091,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 }
                 if type == "shareReferral" {
                     let code = (body["code"] as? String) ?? ""
-                    let link = (body["link"] as? String) ?? "https://poplur.com"
+                    let link = (body["link"] as? String) ?? PoplurShareLink.referral(code: code)
                     // The page writes the invite (it knows where the friend enters the code);
                     // older pages send none.
                     let text = (body["text"] as? String).flatMap { $0.isEmpty ? nil : String($0.prefix(400)) }
