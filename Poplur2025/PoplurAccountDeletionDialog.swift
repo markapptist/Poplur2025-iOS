@@ -1,12 +1,14 @@
 import SwiftUI
 import UIKit
 
-// The account-deletion dialogs in the house style: the native twin of
-// PoplurDialog (poplur-clay-map/src/PoplurDialog.module.css). A pink clay
-// frame around a dark panel, the P tab on the top edge, a rounded title and
-// one pink pill of a button. They replace three stock alerts whose password
-// field rendered as a squashed capsule on iOS 26 (owner, 29 Sep 2026). The
-// password is typed and used here, in the native shell, never in the page.
+// The account-deletion dialogs as a Poplur "clear window": the canonical paint
+// for true transient cards (poplur-clay-map/src/TransientPopupSurface.module.css)
+// in the News pop card's layout (MapNewsCard.module.css). A dark glass card
+// with a thin pink rim and a pink glow in its top corner, a header bar with a
+// status pill and a round ×, a left-aligned heavy title, and rounded-rectangle
+// buttons. They replace three stock alerts whose password field rendered as a
+// squashed capsule on iOS 26 (owner, 29 Sep 2026). The password is typed and
+// used here, in the native shell, never in the page.
 
 @MainActor
 final class PoplurDeletionDialogModel: ObservableObject {
@@ -34,7 +36,7 @@ final class PoplurDeletionDialogController: UIHostingController<PoplurDeletionDi
         super.init(rootView: PoplurDeletionDialogView(model: model))
         modalPresentationStyle = .overFullScreen
         modalTransitionStyle = .crossDissolve
-        // A dark keyboard and dark system chrome under a dark panel.
+        // A dark keyboard and dark system chrome under a dark card.
         overrideUserInterfaceStyle = .dark
         isModalInPresentation = true
     }
@@ -55,18 +57,20 @@ struct PoplurDeletionDialogView: View {
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.58)
-                .ignoresSafeArea()
-                .accessibilityHidden(true)
+            // TransientPopupSurface .scrim: blur(7px) under rgba(9, 5, 11, .52). A
+            // system material at partial strength stands in for the light blur.
+            Rectangle().fill(.ultraThinMaterial).opacity(0.55).ignoresSafeArea()
+            Self.rgb(0x09050b).opacity(0.52).ignoresSafeArea()
             card
-                .frame(maxWidth: 344)
-                .padding(.horizontal, 18)
-                .scaleEffect(shown ? 1 : 0.86)
-                .offset(y: shown ? 0 : 18)
+                .frame(maxWidth: 340)
+                .padding(.horizontal, 20)
+                .scaleEffect(shown ? 1 : 0.94)
+                .offset(y: shown ? 0 : 14)
                 .opacity(shown ? 1 : 0)
         }
+        .accessibilityAddTraits(.isModal)
         .onAppear {
-            withAnimation(.spring(response: 0.38, dampingFraction: 0.68)) { shown = true }
+            withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { shown = true }
         }
         .task {
             guard model.phase == .confirm else { return }
@@ -78,182 +82,201 @@ struct PoplurDeletionDialogView: View {
         }
     }
 
-    // MARK: Frame
+    // MARK: Surface
 
     private var card: some View {
-        VStack(spacing: 12) {
-            switch model.phase {
-            case .confirm:
-                confirmContent
-            case .working:
-                workingContent
-            case let .result(title, message):
-                resultContent(title: title, message: message)
+        VStack(spacing: 0) {
+            header
+            VStack(alignment: .leading, spacing: 0) {
+                switch model.phase {
+                case .confirm:
+                    confirmContent
+                case .working:
+                    workingContent
+                case let .result(title, message):
+                    resultContent(title: title, message: message)
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(EdgeInsets(top: 17, leading: 19, bottom: 19, trailing: 19))
         }
-        .padding(EdgeInsets(top: 40, leading: 16, bottom: 16, trailing: 16))
-        .frame(maxWidth: .infinity)
-        .background(
-            Self.panelShape
-                .fill(Self.panelFill)
-                .overlay(Self.panelShape.strokeBorder(Color.black.opacity(0.6), lineWidth: 1))
-        )
-        .padding(12)
-        .background(
-            Self.frameShape
-                .fill(Self.frameFill)
-                .overlay(Self.frameShape.strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
-        )
-        .overlay(alignment: .top) { tab.offset(y: -26) }
-        .overlay(alignment: .topTrailing) {
-            if model.phase == .confirm { closeButton }
-        }
-        .compositingGroup()
-        .shadow(color: .black.opacity(0.62), radius: 27, x: 0, y: 22)
-        .shadow(color: Self.pink.opacity(0.35), radius: 15)
-        .padding(.top, 26)
+        .background(surfaceFill)
+        .clipShape(Self.cardShape)
+        .overlay(Self.cardShape.strokeBorder(Self.rgb(0xff88c3).opacity(0.72), lineWidth: 1))
+        .shadow(color: .black.opacity(0.7), radius: 27, x: 0, y: 20)
+        .shadow(color: Self.rgb(0xf63b9a).opacity(0.24), radius: 14)
         .animation(.easeInOut(duration: 0.22), value: model.phase)
         .animation(.easeInOut(duration: 0.18), value: model.inlineError)
-        .accessibilityElement(children: .contain)
-        .accessibilityAddTraits(.isModal)
     }
 
-    /// The P tab: a dark clay square with a pink rim, straddling the top edge.
-    private var tab: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(
-                    LinearGradient(colors: [Self.rgb(0x2a1f27), Self.rgb(0x120d12)], startPoint: .top, endPoint: .bottom)
-                        .shadow(.inner(color: .white.opacity(0.14), radius: 0, x: 0, y: 2))
-                        .shadow(.inner(color: .black.opacity(0.55), radius: 0, x: 0, y: -3))
+    /// linear-gradient(150deg, rgba(29,8,24,.97), rgba(8,7,13,.97)) under a
+    /// pink radial glow at 88% 2% that fades out by 38% of the card.
+    private var surfaceFill: some View {
+        GeometryReader { geo in
+            let reach = hypot(geo.size.width * 0.88, geo.size.height * 0.98)
+            ZStack {
+                Self.cardShape.fill(
+                    LinearGradient(
+                        colors: [Self.rgb(0x1d0818).opacity(0.97), Self.rgb(0x08070d).opacity(0.97)],
+                        startPoint: UnitPoint(x: 0.25, y: 0.07),
+                        endPoint: UnitPoint(x: 0.75, y: 0.93)
+                    )
+                    .shadow(.inner(color: .white.opacity(0.19), radius: 0, x: 0, y: 1))
                 )
-            if let logo = Self.logo {
-                Image(uiImage: logo)
-                    .resizable()
-                    .interpolation(.high)
-                    .scaledToFit()
-                    .frame(width: 40, height: 40)
-                    .shadow(color: .black.opacity(0.6), radius: 1.5, x: 0, y: 2)
+                RadialGradient(
+                    colors: [Self.rgb(0xf93c9a).opacity(0.25), .clear],
+                    center: UnitPoint(x: 0.88, y: 0.02),
+                    startRadius: 0,
+                    endRadius: reach * 0.38
+                )
             }
         }
-        .frame(width: 62, height: 62)
-        .background(
-            RoundedRectangle(cornerRadius: 25, style: .continuous)
-                .fill(Self.pink)
-                .padding(-5)
-        )
-        .shadow(color: .black.opacity(0.5), radius: 11, x: 0, y: 10)
-        .accessibilityHidden(true)
     }
 
-    private var closeButton: some View {
-        Button { model.onCancel() } label: {
-            Text("×")
-                .font(.system(size: 30, weight: .heavy, design: .rounded))
+    /// The News pop card's header: a status pill and a round ×.
+    private var header: some View {
+        HStack(spacing: 10) {
+            Text(statusText)
+                .font(.system(size: 10, weight: .black))
+                .tracking(1.4)
                 .foregroundStyle(Color.white)
-                .shadow(color: Self.maroon.opacity(0.6), radius: 0, x: 0, y: 2)
-                .padding(.bottom, 2)
-                .frame(width: 44, height: 44)
-                .contentShape(Circle())
+                .padding(.vertical, 6)
+                .padding(.horizontal, 10)
+                .background(Capsule().fill(statusColor))
+            Spacer(minLength: 0)
+            if model.phase == .confirm {
+                Button { model.onCancel() } label: {
+                    Text("×")
+                        .font(.system(size: 24, weight: .medium))
+                        .foregroundStyle(Color.white)
+                        .padding(.bottom, 3)
+                        .frame(width: 44, height: 44)
+                        .background(Circle().fill(Color.white.opacity(0.09)))
+                        .overlay(Circle().strokeBorder(Self.rgb(0xffcde5).opacity(0.42), lineWidth: 1))
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close")
+            } else {
+                Color.clear.frame(width: 44, height: 44)
+            }
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Close")
-        .padding(.top, 8)
-        .padding(.trailing, 10)
+        .padding(EdgeInsets(top: 10, leading: 16, bottom: 8, trailing: 12))
+        .frame(minHeight: 48)
+        .background(Self.rgb(0x10070f).opacity(0.9))
+    }
+
+    private var statusText: String {
+        switch model.phase {
+        case .confirm: return "ACCOUNT"
+        case .working: return "DELETING"
+        case let .result(title, _): return title == "Account deleted" ? "DELETED" : "ACCOUNT"
+        }
+    }
+
+    private var statusColor: Color {
+        if case .result = model.phase { return Self.rgb(0xf00078) }
+        return Self.rgb(0xe11859)
     }
 
     // MARK: Phases
 
     @ViewBuilder private var confirmContent: some View {
-        heading("Delete account?")
-        bodyText("This permanently deletes your Poplur account, profile, posts, uploaded media and the messages you sent. It can't be undone. Enter your password to confirm.")
+        heading("Delete your account?")
+        summary("This permanently deletes your Poplur account, profile, posts, uploaded media and the messages you sent. It can't be undone.")
+        Text("ENTER YOUR PASSWORD TO CONFIRM")
+            .font(.system(size: 11, weight: .black))
+            .tracking(1.1)
+            .foregroundStyle(Self.rgb(0x71dfff))
+            .padding(.top, 4)
+            .padding(.bottom, 8)
         passwordField
         if let error = model.inlineError {
             Text(error)
-                .font(.system(size: 13, weight: .bold, design: .rounded))
-                .foregroundStyle(Self.pinkLight)
-                .multilineTextAlignment(.center)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(Self.rgb(0xff79b9))
                 .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 8)
                 .transition(.opacity)
         }
-        Button("Delete account", action: confirm)
-            .buttonStyle(PoplurClayPrimaryButtonStyle())
-            .disabled(model.password.isEmpty)
-            .opacity(model.password.isEmpty ? 0.5 : 1)
-        Button { model.onCancel() } label: {
-            Text("Cancel")
-                .font(.system(size: 13, weight: .heavy, design: .rounded))
-                .tracking(0.5)
-                .foregroundStyle(Color.white.opacity(0.82))
-                .frame(maxWidth: .infinity, minHeight: 40)
-                .contentShape(Rectangle())
+        VStack(spacing: 8) {
+            Button("DELETE ACCOUNT", action: confirm)
+                .buttonStyle(PoplurSurfaceButtonStyle(kind: .primary))
+                .disabled(model.password.isEmpty)
+                .opacity(model.password.isEmpty ? 0.45 : 1)
+            Button("CANCEL") { model.onCancel() }
+                .buttonStyle(PoplurSurfaceButtonStyle(kind: .secondary))
         }
-        .buttonStyle(.plain)
+        .padding(.top, 16)
     }
 
     @ViewBuilder private var workingContent: some View {
-        ProgressView()
-            .progressViewStyle(.circular)
-            .controlSize(.large)
-            .tint(Self.pinkLight)
-            .padding(.bottom, 2)
-        heading("Deleting account…")
-        bodyText("Removing your account and personal data. Please keep Poplur open.")
+        HStack(spacing: 12) {
+            ProgressView()
+                .progressViewStyle(.circular)
+                .tint(Self.rgb(0x71dfff))
+            heading("Deleting your account…")
+        }
+        summary("Removing your account and personal data. Please keep Poplur open.")
     }
 
     @ViewBuilder private func resultContent(title: String, message: String) -> some View {
         heading(title)
-        bodyText(message)
+        summary(message)
         Button("OK") { model.onAcknowledge() }
-            .buttonStyle(PoplurClayPrimaryButtonStyle())
+            .buttonStyle(PoplurSurfaceButtonStyle(kind: .primary))
+            .padding(.top, 6)
     }
 
     // MARK: Parts
 
+    /// MapNewsCard `.copy h2`: white, heavy, tight.
     private func heading(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 28, weight: .black, design: .rounded))
-            .tracking(-0.8)
+            .font(.system(size: 23, weight: .black))
+            .tracking(-1.0)
             .foregroundStyle(Color.white)
-            .multilineTextAlignment(.center)
-            .shadow(color: .black.opacity(0.5), radius: 0, x: 0, y: 2)
             .fixedSize(horizontal: false, vertical: true)
             .accessibilityAddTraits(.isHeader)
     }
 
-    private func bodyText(_ text: String) -> some View {
+    /// MapNewsCard `.summary`.
+    private func summary(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 14, weight: .semibold, design: .rounded))
-            .foregroundStyle(Self.muted)
-            .multilineTextAlignment(.center)
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(Self.rgb(0xfff4fa).opacity(0.9))
             .lineSpacing(2.5)
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.top, -4)
+            .padding(.top, 13)
+            .padding(.bottom, 10)
     }
 
+    /// The composer's text field: a dark inset well with a faint pink rim that
+    /// turns cyan while focused.
     private var passwordField: some View {
-        SecureField("", text: $model.password, prompt: Text("Password").foregroundStyle(Self.muted.opacity(0.55)))
-            .font(.system(size: 16, weight: .semibold, design: .rounded))
-            .foregroundStyle(Color.white)
-            .tint(Self.pinkLight)
+        SecureField("", text: $model.password, prompt: Text("Password").foregroundStyle(Color.white.opacity(0.45)))
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(Self.rgb(0xfff9fc))
+            .tint(Self.rgb(0x8de9ff))
             .textContentType(.password)
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
             .submitLabel(.go)
             .focused($passwordFocused)
             .onSubmit(confirm)
-            .padding(.horizontal, 18)
-            .frame(minHeight: 48)
+            .padding(.horizontal, 14)
+            .frame(minHeight: 46)
             .background(
-                Capsule().fill(
-                    Self.rgb(0x0d0b0f)
-                        .shadow(.inner(color: .black.opacity(0.85), radius: 2.5, x: 0, y: 2))
-                        .shadow(.inner(color: .white.opacity(0.06), radius: 0, x: 0, y: -1))
+                RoundedRectangle(cornerRadius: 8, style: .continuous).fill(
+                    Self.rgb(0x09080b).opacity(0.82)
+                        .shadow(.inner(color: .black.opacity(0.62), radius: 6, x: 0, y: 5))
                 )
             )
             .overlay(
-                Capsule().strokeBorder(Self.pinkLight.opacity(passwordFocused ? 0.75 : 0.22), lineWidth: passwordFocused ? 1.5 : 1)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(passwordFocused ? Self.rgb(0x8de9ff) : Self.rgb(0xffd1e9).opacity(0.22), lineWidth: 1)
             )
+            .shadow(color: Self.rgb(0x45cdef).opacity(passwordFocused ? 0.3 : 0), radius: 6)
             .accessibilityLabel("Password")
     }
 
@@ -266,76 +289,57 @@ struct PoplurDeletionDialogView: View {
         model.onConfirm(password)
     }
 
-    // MARK: Style (values from PoplurDialog.module.css)
+    // MARK: Style (values from TransientPopupSurface.module.css and MapNewsCard.module.css)
 
     fileprivate static func rgb(_ hex: UInt32) -> Color {
         Color(red: Double((hex >> 16) & 0xff) / 255, green: Double((hex >> 8) & 0xff) / 255, blue: Double(hex & 0xff) / 255)
     }
 
-    fileprivate static let pink = rgb(0xff2f91)
-    fileprivate static let pinkLight = rgb(0xff79b9)
-    fileprivate static let muted = rgb(0xf0dbe7)
-    fileprivate static let maroon = rgb(0x7a003e)
-    private static let frameShape = RoundedRectangle(cornerRadius: 34, style: .continuous)
-    private static let panelShape = RoundedRectangle(cornerRadius: 24, style: .continuous)
-
-    private static var frameFill: some ShapeStyle {
-        LinearGradient(stops: [
-            .init(color: rgb(0xff7ebb), location: 0),
-            .init(color: pink, location: 0.34),
-            .init(color: rgb(0xd12677), location: 1),
-        ], startPoint: .top, endPoint: .bottom)
-        .shadow(.inner(color: .white.opacity(0.55), radius: 0, x: 0, y: 3))
-        .shadow(.inner(color: maroon.opacity(0.55), radius: 0, x: 0, y: -4))
-    }
-
-    private static var panelFill: some ShapeStyle {
-        LinearGradient(colors: [rgb(0x1f181d), rgb(0x121014)], startPoint: .top, endPoint: .bottom)
-            .shadow(.inner(color: .white.opacity(0.06), radius: 0, x: 0, y: 2))
-            .shadow(.inner(color: .black.opacity(0.35), radius: 12, x: 0, y: 12))
-    }
-
-    /// The web dialog's P tab uses the bundle's own logo mark; draw it once at
-    /// the tab's size instead of scaling the 843 px source every frame.
-    private static let logo: UIImage? = {
-        guard let url = Bundle.main.url(forResource: "logo_icon", withExtension: "png", subdirectory: "ClayMapWeb"),
-              let source = UIImage(contentsOfFile: url.path), source.size.width > 0, source.size.height > 0 else {
-            return UIImage(named: "logo")
-        }
-        let side: CGFloat = 44
-        let scale = min(side / source.size.width, side / source.size.height)
-        let drawn = CGSize(width: source.size.width * scale, height: source.size.height * scale)
-        let origin = CGPoint(x: (side - drawn.width) / 2, y: (side - drawn.height) / 2)
-        return UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { _ in
-            source.draw(in: CGRect(origin: origin, size: drawn))
-        }
-    }()
+    /// 21 px on phones, 26 px wider (the surface's own media query).
+    private static let cardShape = RoundedRectangle(cornerRadius: 21, style: .continuous)
 }
 
-/// PoplurDialog's `.primary`: one pink pill of a button.
-struct PoplurClayPrimaryButtonStyle: ButtonStyle {
+/// TransientPopupSurface `.primary` (pink) and MapNewsCard `.secondary` (cyan
+/// outline): rounded rectangles, spaced capitals.
+struct PoplurSurfaceButtonStyle: ButtonStyle {
+    enum Kind { case primary, secondary }
+    let kind: Kind
+
     func makeBody(configuration: Configuration) -> some View {
         let pressed = configuration.isPressed
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
         return configuration.label
-            .font(.system(size: 17, weight: .black, design: .rounded))
-            .tracking(-0.17)
-            .foregroundStyle(Color.white)
-            .shadow(color: PoplurDeletionDialogView.maroon.opacity(0.5), radius: 0, x: 0, y: 1)
-            .frame(maxWidth: .infinity, minHeight: 52)
+            .font(.system(size: kind == .primary ? 11 : 10, weight: .black))
+            .tracking(kind == .primary ? 1.32 : 1.0)
+            .foregroundStyle(kind == .primary ? Color.white : PoplurDeletionDialogView.rgb(0xbdeeff))
+            .frame(maxWidth: .infinity, minHeight: kind == .primary ? 44 : 42)
             .background(
-                Capsule().fill(
-                    LinearGradient(stops: [
-                        .init(color: PoplurDeletionDialogView.rgb(0xff5fae), location: 0),
-                        .init(color: PoplurDeletionDialogView.pink, location: 0.48),
-                        .init(color: PoplurDeletionDialogView.rgb(0xe0126f), location: 1),
-                    ], startPoint: .top, endPoint: .bottom)
-                    .shadow(.inner(color: .white.opacity(pressed ? 0.35 : 0.5), radius: 0, x: 0, y: 3))
-                    .shadow(.inner(color: PoplurDeletionDialogView.maroon.opacity(0.55), radius: 0, x: 0, y: pressed ? -2 : -4))
+                Group {
+                    if kind == .primary {
+                        shape.fill(
+                            LinearGradient(
+                                colors: [PoplurDeletionDialogView.rgb(0xf63b9a), PoplurDeletionDialogView.rgb(0xbd0f66)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                            .shadow(.inner(color: .white.opacity(0.28), radius: 0, x: 0, y: 1))
+                        )
+                    } else {
+                        shape.fill(PoplurDeletionDialogView.rgb(0x71dfff).opacity(0.08))
+                    }
+                }
+            )
+            .overlay(
+                shape.strokeBorder(
+                    kind == .primary
+                        ? PoplurDeletionDialogView.rgb(0xffbcde).opacity(0.6)
+                        : PoplurDeletionDialogView.rgb(0x71dfff).opacity(0.46),
+                    lineWidth: 1
                 )
             )
-            .shadow(color: PoplurDeletionDialogView.rgb(0xf63b9a).opacity(pressed ? 0.15 : 0.35), radius: 9, x: 0, y: pressed ? 4 : 8)
-            .offset(y: pressed ? 2 : 0)
-            .padding(.top, 2)
-            .contentShape(Capsule())
+            .shadow(color: PoplurDeletionDialogView.rgb(0x6a0035).opacity(kind == .primary ? 0.38 : 0), radius: 8, x: 0, y: 6)
+            .scaleEffect(pressed ? 0.97 : 1)
+            .offset(y: pressed ? 1 : 0)
+            .contentShape(shape)
     }
 }
