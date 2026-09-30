@@ -1765,7 +1765,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 // and engagement, and it is native's to write because native
                 // owns identity in this shell. A report is a write-once note
                 // to Poplur (reports/{auto}); nothing on the client reads it.
-                if type == "blockUser" || type == "unblockUser" || type == "reportUser" {
+                if type == "blockUser" || type == "unblockUser" || type == "reportUser" || type == "reportPost" {
                     let otherUID = ((body["userId"] as? String) ?? "")
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                     let handle = String(((body["username"] as? String) ?? "").prefix(48))
@@ -1794,16 +1794,23 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                                 }
                             }
                     } else {
-                        let reason = String(((body["reason"] as? String) ?? "profile").prefix(64))
-                        firestore.collection("reports").addDocument(data: [
+                        // A pop report also names the pop; its owner stays userId.
+                        let isPost = type == "reportPost"
+                        let postID = String(((body["postId"] as? String) ?? "")
+                            .trimmingCharacters(in: .whitespacesAndNewlines).prefix(128))
+                        if isPost && postID.isEmpty { return }
+                        let reason = String(((body["reason"] as? String) ?? (isPost ? "pop" : "profile")).prefix(64))
+                        var report: [String: Any] = [
                             "reporterId": uid,
                             "userId": otherUID,
                             "username": handle,
                             "reason": reason,
-                            "source": "profile",
+                            "source": isPost ? "post" : "profile",
                             "platform": "ios",
                             "createdAt": FieldValue.serverTimestamp(),
-                        ]) { error in
+                        ]
+                        if isPost { report["postId"] = postID }
+                        firestore.collection("reports").addDocument(data: report) { error in
                             if let error {
                                 os_log("[PostLoginHomeWebView] report write failed: %{public}@",
                                        log: .default, type: .error, error.localizedDescription)

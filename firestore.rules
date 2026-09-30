@@ -279,7 +279,13 @@ service cloud.firestore {
         && request.resource.data.reason is string
         && request.resource.data.reason.size() <= 64
         && request.resource.data.keys().hasOnly(
-          ['reporterId', 'userId', 'username', 'reason', 'source', 'platform', 'createdAt']);
+          ['reporterId', 'userId', 'username', 'reason', 'source', 'platform', 'createdAt', 'postId'])
+        // A report about one pop names it; userId stays the pop's owner, so
+        // reporting your own pop is refused by the check above.
+        && (!('postId' in request.resource.data)
+          || (request.resource.data.postId is string
+            && request.resource.data.postId.size() > 0
+            && request.resource.data.postId.size() <= 128));
     }
 
     match /users/{userId} {

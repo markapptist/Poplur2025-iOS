@@ -43,6 +43,7 @@ import {
 } from "./postEngagementPolicy";
 import { radiusHistoryDocument, radiusHistoryRef } from "./radiusHistory";
 export { notifyOnDirectMessage } from "./directMessageNotifications";
+export { notifyOnReport } from "./reportNotifications";
 export { setAccountLocationPrivacy } from "./accountPrivacy";
 export { meshyGenerate, meshyStatus } from "./meshyModels";
 export { wardrobeGarmentApi } from "./wardrobeGarments";
