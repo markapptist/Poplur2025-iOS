@@ -79,7 +79,10 @@ final class AuthViewModel: ObservableObject {
                 // attach it to and skips the write. Re-syncing here is what stops
                 // the device from staying registered to nobody. This listener
                 // also fires once immediately, so a cached session is covered.
-                if user != nil { PoplurMessaging.shared.syncTokenForCurrentUser() }
+                if user != nil {
+                    PoplurMessaging.shared.syncTokenForCurrentUser()
+                    PoplurCallKit.shared.syncTokenForCurrentUser()
+                }
             }
         }
     }
@@ -99,6 +102,8 @@ final class AuthViewModel: ObservableObject {
     }
 
     func signOut() {
+        // While still signed in: this phone must stop ringing for this account.
+        PoplurCallKit.forgetTokenBeforeSignOut()
         do {
             try Auth.auth().signOut()
             PoplurNativeAnalytics.didSignOut()

@@ -79,6 +79,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // Always configure Firebase (needed for Auth).
         FirebaseBootstrap.configureIfNeeded()
 
+        // Calls that ring a closed or locked iPhone (A7). PushKit delivers the
+        // VoIP push that woke a killed Poplur only once a registry exists, so
+        // this runs here, synchronously, after Firebase and before anything else.
+        PoplurCallKit.shared.start()
+
         // Listen for the capture flows' "upload this" notifications. Without this
         // observer every capture route (native overlay, map post, web composer)
         // showed an uploading banner and then dropped the media on the floor.

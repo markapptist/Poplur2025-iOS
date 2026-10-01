@@ -23,6 +23,15 @@ final class PoplurCallSignalling {
     private var candidateListener: ListenerRegistration?
     private var incomingListener: ListenerRegistration?
     private var activeCallID: String?
+    /// Calls handed to the page as incoming that are still ringing.
+    private var ringingInPage = Set<String>()
+
+    /// The page has a live listener for calls to this account (PoplurCallKit
+    /// leaves a call to it while Poplur is in front).
+    var isWatchingIncoming: Bool { incomingListener != nil }
+
+    /// The page is ringing this call itself, so CallKit must not ring it too.
+    func pageIsRinging(_ callID: String) -> Bool { ringingInPage.contains(callID) }
 
     /// Fired for everything the page needs to know. One channel keeps the
     /// ordering the page sees identical to the ordering Firestore produced.
@@ -185,9 +194,9 @@ final class PoplurCallSignalling {
 
     /// Watches for somebody calling YOU while the app is open.
     ///
-    /// Foreground only, deliberately: ringing a locked phone needs PushKit and
-    /// CallKit, and Apple requires a CallKit report on every VoIP push or it
-    /// kills the app. That is its own piece of work, not a flag on this one.
+    /// Foreground only, deliberately: a closed or locked phone rings through
+    /// PushKit and CallKit instead (PoplurCallKit), and a call CallKit shows is
+    /// left to it.
     func observeIncoming() {
         guard let uid else { return }
         incomingListener?.remove()
@@ -211,6 +220,7 @@ final class PoplurCallSignalling {
                     guard data["calleeId"] as? String == uid,
                           data["callerId"] as? String != uid else { continue }
                     if change.type == .removed {
+                        self.ringingInPage.remove(change.document.documentID)
                         self.onEvent?([
                             "type": "poplurCallIncomingUnavailable",
                             "callId": change.document.documentID,
@@ -221,6 +231,11 @@ final class PoplurCallSignalling {
                     // The legacy Agora caller shares this collection/query. The
                     // WebView peer connection must answer only WebRTC rendezvous.
                     guard data["provider"] as? String == "webrtc" else { continue }
+                    // Already ringing on the iPhone's own call screen (PoplurCallKit),
+                    // which answers it into this page; ringing here as well would
+                    // offer the same call twice.
+                    guard !PoplurCallKit.shared.isPresenting(change.document.documentID) else { continue }
+                    self.ringingInPage.insert(change.document.documentID)
                     self.onEvent?([
                         "type": "poplurCallIncoming",
                         "callId": change.document.documentID,
@@ -242,5 +257,6 @@ final class PoplurCallSignalling {
     func stopAll() {
         stopObserving()
         incomingListener?.remove(); incomingListener = nil
+        ringingInPage.removeAll()
     }
 }

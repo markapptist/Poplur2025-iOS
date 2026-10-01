@@ -1027,6 +1027,12 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 self.pendingPostFocus = info
                 self.deliverPendingPostFocus()
             })
+            // A call answered on the iPhone's call screen (PoplurCallKit, A7).
+            notificationObservers.append(NotificationCenter.default.addObserver(
+                forName: PoplurCallKit.answerReady, object: nil, queue: .main
+            ) { [weak self] _ in
+                self?.deliverPendingCallAnswer()
+            })
         }
 
         /// Draw a foreground push as the web layer's own banner. False when
@@ -1075,7 +1081,10 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 cancelNavigatorMotionDemandExpiry()
             }
             syncMotionLease()
-            if active { replayLatestMotion() }
+            if active {
+                replayLatestMotion()
+                deliverPendingCallAnswer()
+            }
         }
 
         private func cancelNavigatorMotionDemandExpiry() {
@@ -1599,14 +1608,18 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     return
                 }
                 if type == "callEnd" {
+                    let callID = (body["callId"] as? String) ?? ""
+                    PoplurCallKit.shared.pageEnded(callID)
                     Task { @MainActor in
-                        await PoplurCallSignalling.shared.endCall((body["callId"] as? String) ?? "")
+                        await PoplurCallSignalling.shared.endCall(callID)
                     }
                     return
                 }
                 if type == "callDecline" {
+                    let callID = (body["callId"] as? String) ?? ""
+                    PoplurCallKit.shared.pageEnded(callID)
                     Task { @MainActor in
-                        await PoplurCallSignalling.shared.declineCall((body["callId"] as? String) ?? "")
+                        await PoplurCallSignalling.shared.declineCall(callID)
                     }
                     return
                 }
@@ -1617,10 +1630,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     return
                 }
                 if type == "callWatchIncoming", let webView = bridge.webView {
-                    PoplurCallSignalling.shared.onEvent = { [weak self, weak webView] event in
-                        guard let self, let webView, self.bridge.webView === webView else { return }
-                        self.pushWalletPassMessage(event, into: webView)
-                    }
+                    routeCallEvents(into: webView)
                     PoplurCallSignalling.shared.observeIncoming()
                     return
                 }
@@ -3982,7 +3992,34 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             replayLatestMotion()
             deliverPendingDMDeepLink()
             deliverPendingPostFocus()
+            deliverPendingCallAnswer()
             DispatchQueue.main.async { [onReady] in onReady() }
+        }
+
+        /// A call answered on the iPhone's call screen joins here once Home is
+        /// ready and in front, the way a tapped DM opens (A7). The page joins
+        /// from `poplurCallAnswer`, as it does for Android's ringing screen.
+        private func deliverPendingCallAnswer() {
+            guard didSignalReady, webForegroundActive,
+                  let webView = bridge.webView,
+                  let call = PoplurCallKit.shared.takePendingAnswer() else { return }
+            routeCallEvents(into: webView)
+            pushWalletPassMessage([
+                "type": "poplurCallAnswer",
+                "callId": call.callId,
+                "callerId": call.callerId,
+                "callerName": call.callerName,
+                "video": call.video,
+                "context": call.context,
+            ], into: webView)
+        }
+
+        /// Call events go to this document: offers, answers, candidates, endings.
+        private func routeCallEvents(into webView: WKWebView) {
+            PoplurCallSignalling.shared.onEvent = { [weak self, weak webView] event in
+                guard let self, let webView, self.bridge.webView === webView else { return }
+                self.pushWalletPassMessage(event, into: webView)
+            }
         }
 
         private func deliverPendingDMDeepLink() {
