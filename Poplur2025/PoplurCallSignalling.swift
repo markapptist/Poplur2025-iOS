@@ -203,6 +203,13 @@ final class PoplurCallSignalling {
             .addSnapshotListener { [weak self] snapshot, _ in
                 guard let self else { return }
                 for change in snapshot?.documentChanges ?? [] {
+                    let data = change.document.data()
+                    // The query matches every ringing call this account is IN,
+                    // including the ones it placed. Only the callee rings: from
+                    // 4 Sep the caller's own page received its outgoing call as
+                    // incoming and declined it as busy.
+                    guard data["calleeId"] as? String == uid,
+                          data["callerId"] as? String != uid else { continue }
                     if change.type == .removed {
                         self.onEvent?([
                             "type": "poplurCallIncomingUnavailable",
@@ -211,7 +218,6 @@ final class PoplurCallSignalling {
                         continue
                     }
                     guard change.type == .added else { continue }
-                    let data = change.document.data()
                     // The legacy Agora caller shares this collection/query. The
                     // WebView peer connection must answer only WebRTC rendezvous.
                     guard data["provider"] as? String == "webrtc" else { continue }

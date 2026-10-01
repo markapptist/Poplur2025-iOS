@@ -44,6 +44,7 @@ import {
 } from "./postEngagementPolicy";
 import { radiusHistoryDocument, radiusHistoryRef } from "./radiusHistory";
 export { notifyOnDirectMessage } from "./directMessageNotifications";
+export { notifyOnCall } from "./callNotifications";
 export { notifyOnReport } from "./reportNotifications";
 export { setAccountLocationPrivacy } from "./accountPrivacy";
 export { meshyGenerate, meshyStatus } from "./meshyModels";
