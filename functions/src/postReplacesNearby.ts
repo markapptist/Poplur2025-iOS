@@ -105,10 +105,15 @@ export async function replaceNearbyOwnPops(
     if (!snapshot.exists || !post) return [];
     const owner = postOwnerUid(post);
     if (!owner || !postOrigin(post) || !isLivePost(post)) return [];
+    // The officialContent seed layer is ambient world-radius content, not a
+    // person's pop: one owner (PoplurTest) holds dozens of seeds a few hundred
+    // metres apart by design, so the one-live-pop-per-place rule neither
+    // applies to a new seed nor lets any pop expire an existing seed.
+    if (post.officialContent === true) return [];
     const own = await tx.get(db.collection("posts").where("userID", "==", owner));
     const replaced = nearbyOwnPops(
       { id: postId, data: post },
-      own.docs.map(doc => ({ id: doc.id, data: doc.data() })),
+      own.docs.map(doc => ({ id: doc.id, data: doc.data() })).filter(doc => doc.data.officialContent !== true),
     );
     if (replaced.length === 0) return [];
 

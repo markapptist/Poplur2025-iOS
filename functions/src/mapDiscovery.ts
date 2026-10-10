@@ -19,6 +19,14 @@ const region = 'us-central1';
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 const ownerId = (p: admin.firestore.DocumentData) => String(p.userID || p.userId || '');
 const safeId = (s: unknown): s is string => typeof s === 'string' && /^[\w.-]{1,180}$/.test(s);
+/** The officialContent seed layer is the map's floor (restored 22 Sep 2026 after
+ * the decay trial zeroed it; expired out of every launch-zoom tile again on 5 Oct
+ * when RANK_MAX_AGE passed). A floor that ages out is not a floor: official seeds
+ * keep a century-long ranking window; real pops keep the 72 h one. */
+const OFFICIAL_RANK_MAX_AGE_MS = 100 * 365 * 86400_000;
+/** Cloud Tasks refuses a scheduleTime more than 30 days out, and the summary
+ * "clock" job is scheduled at the winner's expiry: never let it exceed 29 days. */
+const MAX_CLOCK_HORIZON_MS = 29 * 86400_000;
 type Job = { kind: 'cell' | 'region' | 'owner'; key: string; cohort: 'real' | 'test'; version: number; generation: number; shard: number; dueAt: Timestamp; cursor?: string; field?: string };
 type Summary = { winner: Candidate | null; alternates: Candidate[]; challengerId: string | null; challengerSince: number; updatedAtMillis: number; cohort: string; leaf?: string };
 
@@ -52,7 +60,7 @@ export async function reconcileMapPost(postId: string) {
         latitude: post.latitude, longitude: post.longitude, createdAtMillis: created,
         rankKey: rankKey(rank || {}, created), exposure: rank?.views || 0, rankAt: rank?.at || created,
         rankBucket: Math.floor((rank?.at || created) / RANK_WINDOW_MS), rankEligible: (rank?.views || 0) >= 5,
-        expiresAtMillis: Math.max(created, rank?.at || 0) + RANK_MAX_AGE_MS };
+        expiresAtMillis: Math.max(created, rank?.at || 0) + (post.officialContent === true ? OFFICIAL_RANK_MAX_AGE_MS : RANK_MAX_AGE_MS) };
     }
     const same = !old && !next || old && next && Object.keys(old).length === Object.keys(next).length
       && Object.entries(next).every(([key, value]) => (old as unknown as Record<string, unknown>)[key] === value);
@@ -138,7 +146,7 @@ export async function rebuildMapSummary(kind: 'cell' | 'region', key: string, co
     const winner = choice.winner;
     const qualificationEnds = winner && qualifiedWinner(winner, now)
       ? winner.rankAt + Math.log(winner.exposure / 5) * (6 * 3600_000 / Math.LN2) + 1000 : Infinity;
-    const nextDue = winner ? Math.min(winner.expiresAtMillis + 1000, qualificationEnds) : 0;
+    const nextDue = winner ? Math.min(winner.expiresAtMillis + 1000, qualificationEnds, now + MAX_CLOCK_HORIZON_MS) : 0;
     return { changed: JSON.stringify(summaryCandidates(old)) !== JSON.stringify(summaryCandidates(next)), challenger: Boolean(choice.challengerId), nextDue };
   });
   if (result.changed && parent) await dirtyMapSummary('region', regionId(parent), cohort, key, 5);
