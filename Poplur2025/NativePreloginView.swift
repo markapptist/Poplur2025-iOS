@@ -159,7 +159,7 @@ struct NativePreloginView: View {
             // to supply one.
             clayButton(model.photo == nil ? "Skip for now" : "Continue", id: "photoNext") { model.go(.gender) }
         case .gender:
-            heading("Is your cube male or female?"); subtitle("Pick the clay head your profile cube wears.")
+            heading("Are you male or female?"); subtitle("Pick the clay head your profile cube wears.")
             choice("Male", detail: "The original mark head", asset: "poplur_mark_head_navigator", selected: model.gender == "male") { model.gender = "male"; Task { await model.submit(auth: auth) } }
             choice("Female", detail: "The female head", asset: "poplur_female_head_navigator", selected: model.gender == "female") { model.gender = "female"; Task { await model.submit(auth: auth) } }
             subtitle("You can change this any time in Settings · Profile.")
