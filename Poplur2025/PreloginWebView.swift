@@ -3,6 +3,7 @@ import WebKit
 import Combine
 import UniformTypeIdentifiers
 import FirebaseAuth
+import FirebaseFirestore
 import CoreLocation
 import Photos
 
@@ -33,6 +34,7 @@ import Photos
 //                           (`camera` is the legacy web key for camera roll/photos)
 //     "complete"          → flow finished → onComplete() handoff to post-login
 //     "pop"               → haptic tap (auxiliary)
+//     "poplurGenderSelected" → { gender: "male" | "female" } (legacy `type` key)
 
 enum PoplurPreloginWeb {
     // Custom scheme (not file://) so the page gets a real origin: ES modules,
@@ -1020,6 +1022,29 @@ struct PreloginWebView: UIViewRepresentable {
                     longitude: coordinate?.longitude ?? Self.fallbackRadioLongitude,
                     callbackId: callbackId
                 )
+            case "poplurGenderSelected":
+                // Gender pane → the same persistence as the native path
+                // (NativePreloginModel): UserDefaults for the post-login home
+                // to inject as localStorage, plus users/{uid}.profileGender.
+                let gender = body?["gender"] as? String ?? ""
+                guard gender == "male" || gender == "female" else {
+                    print("[PreloginWebView] ignored unknown gender: \(gender)")
+                    return
+                }
+                UserDefaults.standard.set(gender, forKey: "poplur.nativeOnboarding.gender")
+                guard let uid = Auth.auth().currentUser?.uid else {
+                    print("[PreloginWebView] gender \(gender) stored without uid — no signed-in user")
+                    return
+                }
+                UserDefaults.standard.set(uid, forKey: "poplur.nativeOnboarding.uid")
+                Firestore.firestore().collection("users").document(uid)
+                    .setData(["profileGender": gender], merge: true) { error in
+                        if let error {
+                            PoplurDiagLog.append("[PreloginWebView] profileGender write FAILED: \(error.localizedDescription)")
+                        } else {
+                            print("[PreloginWebView] profileGender=\(gender) saved for \(uid)")
+                        }
+                    }
             case "complete":
                 // Flow finished → hand off to the existing post-login path.
                 PoplurPermissionRouting.markPreloginHandledThisLaunch()

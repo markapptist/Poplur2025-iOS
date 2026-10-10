@@ -150,6 +150,24 @@ function cleanWelcome(html) {
   //    host also sets overrideUserInterfaceStyle = .dark; both align to dark.
   out = out.replace(/:root\{color-scheme:light\}/, ":root{color-scheme:dark}");
 
+  // 6c. Native form controls stay LIGHT (Mark, 10 Oct 2026). The root flip in 6
+  //     also re-skins the only controls the welcome leaves to the OS: the Terms
+  //     checkbox on the Create-login pane (an unstyled <input type="checkbox">
+  //     with just accent-color, so its glyph follows color-scheme) and the
+  //     Month/Day/Year <select>s (appearance: none in the page, but their iOS
+  //     picker popovers follow the element's color-scheme). The web Good Copy
+  //     renders both light; pin the native-control family back to light on the
+  //     elements themselves so the root keeps declaring dark for the pill-button
+  //     skin. radio/date are included so a future Good Copy control lands light
+  //     too. In-page paint is unchanged: .stackField/.stackAgree author their own
+  //     color + background, so only the OS-drawn glyph and popovers move.
+  const NATIVE_CONTROLS_LIGHT =
+    'input[type="checkbox"],input[type="radio"],select,input[type="date"]{color-scheme:light}';
+  if (!out.includes(":root{color-scheme:dark}")) {
+    throw new Error("6c native-control scheme: wrapper reset ':root{color-scheme:dark}' missing; step 6 flip did not apply.");
+  }
+  out = out.replace(":root{color-scheme:dark}", ":root{color-scheme:dark}" + NATIVE_CONTROLS_LIGHT);
+
   // 6a. Keyboard hardening (BUG-1). The pre-login is a fixed full-screen layout;
   //     when a field is focused iOS both (a) auto-zooms into sub-16px inputs and
   //     (b) scrolls the layout up to clear the keyboard — both displace the UI.
