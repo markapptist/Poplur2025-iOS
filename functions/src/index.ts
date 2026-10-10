@@ -34,6 +34,7 @@ export { radiusHistoryOnPostCreated } from "./radiusHistory";
 export { accountTotalRadiusOnPostWritten } from "./accountTotalRadius";
 export { postReplacesNearbyOwnPops } from "./postReplacesNearby";
 export { betaScorecard } from "./betaScorecard";
+export { betaInstallsOnUserCreated, betaInstallsOnUserDeleted } from "./betaInstalls";
 export { accountRadiusOnPostDeleted } from "./accountRadiusOnPostDeleted";
 import { publishGeneratedPost } from "./generatedPostPublishing";
 import {
