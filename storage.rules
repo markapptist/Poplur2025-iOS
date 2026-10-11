@@ -18,9 +18,13 @@ rules_version = '2';
 // folder is an unmetered file host that happens to require a login.
 service firebase.storage {
   match /b/{bucket}/o {
+    // 10 Oct 2026: the cross-service Firestore lookup (accountDeletions tombstone) made EVERY client
+    // write fail with "Permission denied" from the moment these rules went live on 24 Sep — the
+    // Rules service agent lacked the Firestore service-agent role, and even after the grant the
+    // lookup still denied. Signed-in is the check until the lookup is proven to work again; a
+    // deleted account's token expires within the hour anyway.
     function activeAccount() {
-      return request.auth != null
-        && !firestore.exists(/databases/(default)/documents/accountDeletions/$(request.auth.uid));
+      return request.auth != null;
     }
 
 
