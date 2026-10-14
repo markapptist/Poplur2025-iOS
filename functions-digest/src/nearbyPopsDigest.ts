@@ -74,8 +74,8 @@ async function sendDigest(uid: string, tokens: string[], notification: { title: 
       tokens: batch,
       notification,
       data,
-      apns: { payload: { aps: { "thread-id": "nearby-pops", sound: "default" } } },
-      android: { priority: "high", notification: { channelId: "poplur_alerts", tag: "nearby-pops" } },
+      apns: { payload: { aps: { "thread-id": "nearby-pops", sound: "poplur_pop.wav" } } },
+      android: { priority: "high", notification: { channelId: "poplur_alerts_pop_v2", sound: "poplur_pop", tag: "nearby-pops" } },
     });
     response.responses.forEach((result, index) => {
       if (result.success) { delivered++; return; }

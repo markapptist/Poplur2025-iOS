@@ -60,6 +60,14 @@ const region = 'us-central1';
 const sha = (s) => (0, crypto_1.createHash)('sha256').update(s).digest('hex');
 const ownerId = (p) => String(p.userID || p.userId || '');
 const safeId = (s) => typeof s === 'string' && /^[\w.-]{1,180}$/.test(s);
+/** The officialContent seed layer is the map's floor (restored 22 Sep 2026 after
+ * the decay trial zeroed it; expired out of every launch-zoom tile again on 5 Oct
+ * when RANK_MAX_AGE passed). A floor that ages out is not a floor: official seeds
+ * keep a century-long ranking window; real pops keep the 72 h one. */
+const OFFICIAL_RANK_MAX_AGE_MS = 100 * 365 * 86400_000;
+/** Cloud Tasks refuses a scheduleTime more than 30 days out, and the summary
+ * "clock" job is scheduled at the winner's expiry: never let it exceed 29 days. */
+const MAX_CLOCK_HORIZON_MS = 29 * 86400_000;
 /** Durable, sharded invalidation outbox. Repeated events coalesce for 30s;
  * different posts do not contend on one worldwide/cell counter. */
 async function dirtyMapSummary(kind, key, cohort, source, delay = 30) {
@@ -92,7 +100,7 @@ async function reconcileMapPost(postId) {
                 latitude: post.latitude, longitude: post.longitude, createdAtMillis: created,
                 rankKey: (0, mapDiscoveryPolicy_1.rankKey)(rank || {}, created), exposure: rank?.views || 0, rankAt: rank?.at || created,
                 rankBucket: Math.floor((rank?.at || created) / mapDiscoveryPolicy_1.RANK_WINDOW_MS), rankEligible: (rank?.views || 0) >= 5,
-                expiresAtMillis: Math.max(created, rank?.at || 0) + mapDiscoveryPolicy_1.RANK_MAX_AGE_MS };
+                expiresAtMillis: Math.max(created, rank?.at || 0) + (post.officialContent === true ? OFFICIAL_RANK_MAX_AGE_MS : mapDiscoveryPolicy_1.RANK_MAX_AGE_MS) };
         }
         const same = !old && !next || old && next && Object.keys(old).length === Object.keys(next).length
             && Object.entries(next).every(([key, value]) => old[key] === value);
@@ -191,7 +199,7 @@ async function rebuildMapSummary(kind, key, cohort) {
         const winner = choice.winner;
         const qualificationEnds = winner && (0, mapDiscoveryPolicy_1.qualifiedWinner)(winner, now)
             ? winner.rankAt + Math.log(winner.exposure / 5) * (6 * 3600_000 / Math.LN2) + 1000 : Infinity;
-        const nextDue = winner ? Math.min(winner.expiresAtMillis + 1000, qualificationEnds) : 0;
+        const nextDue = winner ? Math.min(winner.expiresAtMillis + 1000, qualificationEnds, now + MAX_CLOCK_HORIZON_MS) : 0;
         return { changed: JSON.stringify(summaryCandidates(old)) !== JSON.stringify(summaryCandidates(next)), challenger: Boolean(choice.challengerId), nextDue };
     });
     if (result.changed && parent)

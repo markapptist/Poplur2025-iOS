@@ -21,6 +21,13 @@ struct SplashPlaybackCheck {
             try await Task.sleep(for: .milliseconds(50))
         }
         require(playback.elapsed > 0.35 && !playback.hasFinished, "real bundled video begins playing")
+        let interruptedAt = playback.elapsed
+        playback.player.pause() // An audio-session interruption, without a scene change.
+        for _ in 0..<60 {
+            if playback.elapsed > interruptedAt + 0.15 { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        require(playback.elapsed > interruptedAt + 0.15 && !playback.hasFinished, "a paused active decoder resumes instead of freezing or skipping the clip")
         playback.setActive(false)
         try await Task.sleep(for: .milliseconds(200))
         let pausedAt = playback.elapsed
@@ -41,5 +48,15 @@ struct SplashPlaybackCheck {
         require(abs(playback.player.currentTime().seconds - endTime) < 0.1, "finished video holds its final frame without looping")
         playback.stop()
         require(playback.player.currentItem == nil, "dismissal releases the video")
+
+        let stalled = SplashPlayback(url: URL(fileURLWithPath: CommandLine.arguments[1]), recoveryDelay: 0.2, stallLimit: 0.8)
+        stalled.setActive(true)
+        stalled.player.replaceCurrentItem(with: nil) // Decoder is lost; no end notification can arrive.
+        for _ in 0..<40 {
+            if stalled.hasFinished { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        require(stalled.hasFinished, "unrecoverable decoder loss has a bounded exit")
+        stalled.stop()
     }
 }
