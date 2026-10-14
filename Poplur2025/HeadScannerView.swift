@@ -1,6 +1,8 @@
 import SwiftUI
-import ARKit
 import UIKit
+#if POPLUR_TRUEDEPTH_HEAD_SCAN
+import ARKit
+#endif
 
 struct HSOutput {
     let usdzURL: URL?
@@ -13,6 +15,10 @@ enum HSError: Error {
     case cancelled
 }
 
+// The ARKit face-tracking scanner (TrueDepth) is compiled out of shipping
+// builds (App Review 2.5.1): nothing reachable uses it. Define
+// POPLUR_TRUEDEPTH_HEAD_SCAN to bring it back for experiments.
+#if POPLUR_TRUEDEPTH_HEAD_SCAN
 class HSScannerViewController: UIViewController, ARSessionDelegate {
     var onComplete: ((Swift.Result<HSOutput, HSError>) -> Void)?
 
@@ -232,6 +238,9 @@ class HSScannerViewController: UIViewController, ARSessionDelegate {
     }
 }
 
+#endif
+
+#if POPLUR_TRUEDEPTH_HEAD_SCAN
 struct HeadScannerView: View {
     var onComplete: (Swift.Result<HSOutput, HSError>) -> Void
     @State private var result: HSOutput? = nil
@@ -322,3 +331,21 @@ struct HSScannerViewControllerRepresentable: UIViewControllerRepresentable {
         uiViewController.tearDown()
     }
 }
+#else
+struct HeadScannerView: View {
+    var onComplete: (Swift.Result<HSOutput, HSError>) -> Void
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "face.dashed")
+                .font(.system(size: 44))
+                .foregroundStyle(.secondary)
+            Text("Head scan is not available in this version.")
+                .font(.headline)
+                .multilineTextAlignment(.center)
+        }
+        .padding(24)
+        .onAppear { onComplete(.failure(.unavailable)) }
+    }
+}
+#endif

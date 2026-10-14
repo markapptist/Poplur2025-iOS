@@ -4,6 +4,7 @@ import FirebaseAuth
 import FirebaseFirestore
 import Foundation
 import PushKit
+import StoreKit
 import UIKit
 
 /// Calls that ring a closed or locked iPhone (A7 in .codex/mvp-finish-plan.md,
@@ -27,6 +28,12 @@ import UIKit
 /// the message Android's ringing screen sends. Every call is reported as video:
 /// answering a video call on a locked iPhone asks for Face ID and brings the
 /// app forward, and the page has to be on screen to use the microphone.
+///
+/// China: MIIT requires CallKit to be inactive for the China storefront (App
+/// Review guideline 5). There, `isAllowedHere` is false: no CXProvider is made
+/// and no PushKit registry, so no VoIP push is ever delivered or reported, and
+/// any token stored earlier is withdrawn. In-app calls still work through the
+/// page while Poplur is open; they just never ring a closed phone.
 @MainActor
 final class PoplurCallKit: NSObject {
     static let shared = PoplurCallKit()
@@ -71,12 +78,27 @@ final class PoplurCallKit: NSObject {
         var timeout: Task<Void, Never>?
     }
 
-    private let provider: CXProvider
+    /// Nil where CallKit must stay off (see `isAllowedHere`).
+    private let provider: CXProvider?
     private var registry: PKPushRegistry?
     private var calls: [UUID: Presented] = [:]
     private var pendingAnswer: IncomingCall?
 
+    /// False for the mainland China storefront, or a mainland China region
+    /// when the storefront is not known yet. Decided once per launch.
+    nonisolated static let isAllowedHere: Bool = {
+        if let country = SKPaymentQueue.default().storefront?.countryCode {
+            return country.uppercased() != "CHN"
+        }
+        return Locale.current.region?.identifier.uppercased() != "CN"
+    }()
+
     private override init() {
+        guard Self.isAllowedHere else {
+            provider = nil
+            super.init()
+            return
+        }
         let configuration = CXProviderConfiguration()
         configuration.supportsVideo = true
         configuration.maximumCallGroups = 1
@@ -84,7 +106,8 @@ final class PoplurCallKit: NSObject {
         configuration.supportedHandleTypes = [.generic]
         // A Poplur call is not a phone number: keep it out of the Phone app's Recents.
         configuration.includesCallsInRecents = false
-        provider = CXProvider(configuration: configuration)
+        let provider = CXProvider(configuration: configuration)
+        self.provider = provider
         super.init()
         provider.setDelegate(self, queue: nil)
     }
@@ -92,6 +115,12 @@ final class PoplurCallKit: NSObject {
     /// At every launch, from didFinishLaunching: a VoIP push that woke a killed
     /// Poplur is delivered only once a registry with a delegate exists.
     func start() {
+        guard Self.isAllowedHere else {
+            // A token saved before (another storefront) must not ring this phone.
+            Self.forgetTokenBeforeSignOut()
+            UserDefaults.standard.removeObject(forKey: Self.tokenKey)
+            return
+        }
         guard registry == nil else { return }
         let registry = PKPushRegistry(queue: .main)
         registry.delegate = self
@@ -112,7 +141,7 @@ final class PoplurCallKit: NSObject {
         if let uuid = calls.first(where: { $0.value.call.callId == call.callId })?.key {
             let update = CXCallUpdate()
             update.localizedCallerName = call.callerName
-            provider.reportCall(with: uuid, updated: update)
+            provider?.reportCall(with: uuid, updated: update)
         }
         return call
     }
@@ -128,7 +157,7 @@ final class PoplurCallKit: NSObject {
     /// Writes this phone's VoIP token to the signed-in user. Called when the
     /// token arrives and whenever someone signs in.
     func syncTokenForCurrentUser() {
-        guard let token = UserDefaults.standard.string(forKey: Self.tokenKey),
+        guard Self.isAllowedHere, let token = UserDefaults.standard.string(forKey: Self.tokenKey),
               let uid = Auth.auth().currentUser?.uid else { return }
         let environment = Self.apnsEnvironment
         // merge:true keeps the user's other fields and other phones' tokens.
@@ -175,6 +204,11 @@ final class PoplurCallKit: NSObject {
     // MARK: - Ringing
 
     private func receive(_ payload: [AnyHashable: Any], completion: @escaping () -> Void) {
+        // No registry is made where CallKit is off, so this is never reached there.
+        guard let provider else {
+            completion()
+            return
+        }
         let uuid = UUID()
         let update = CXCallUpdate()
         update.hasVideo = true
@@ -190,7 +224,7 @@ final class PoplurCallKit: NSObject {
             let pageRings = IncomingCall(payload).map { PoplurCallSignalling.shared.pageIsRinging($0.callId) } ?? false
             provider.reportNewIncomingCall(with: uuid, update: update) { [weak self] _ in
                 Task { @MainActor in
-                    self?.provider.reportCall(with: uuid, endedAt: nil, reason: pageRings ? .answeredElsewhere : .remoteEnded)
+                    self?.provider?.reportCall(with: uuid, endedAt: nil, reason: pageRings ? .answeredElsewhere : .remoteEnded)
                     completion()
                 }
             }
@@ -264,7 +298,7 @@ final class PoplurCallKit: NSObject {
     private func end(_ uuid: UUID, reason: CXCallEndedReason) {
         guard calls[uuid] != nil else { return }
         drop(uuid)
-        provider.reportCall(with: uuid, endedAt: nil, reason: reason)
+        provider?.reportCall(with: uuid, endedAt: nil, reason: reason)
     }
 
     private func drop(_ uuid: UUID) {

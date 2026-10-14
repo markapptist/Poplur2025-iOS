@@ -3,7 +3,7 @@ import UIKit
 import FirebaseAuth
 @preconcurrency import FirebaseFirestore
 import UserNotifications
-import ARKit
+import CoreLocation
 
 // ProfileView listens for:
 // - OpenUserDetailForUser: ["userID": String, "currentPostID": String] to show a specific user's profile

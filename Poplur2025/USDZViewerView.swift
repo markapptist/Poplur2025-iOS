@@ -1,8 +1,15 @@
 import SwiftUI
+import QuickLook
+// The ARKit/RealityKit viewer is compiled out of shipping builds (App Review
+// 2.5.1): the screen is reachable only from the retired native Profile.
+// Define POPLUR_TRUEDEPTH_HEAD_SCAN to bring the AR version back.
+#if POPLUR_TRUEDEPTH_HEAD_SCAN
 import RealityKit
 import ARKit
 import CoreMotion
+#endif
 
+#if POPLUR_TRUEDEPTH_HEAD_SCAN
 struct USDZViewerView: View {
     let usdzURL: URL
 
@@ -145,3 +152,39 @@ private struct USDZViewerRepresentable: UIViewRepresentable {
         }
     }
 }
+#else
+struct USDZViewerView: View {
+    let usdzURL: URL
+
+    var body: some View {
+        USDZQuickLookPreview(url: usdzURL)
+            .ignoresSafeArea()
+            .navigationTitle("Head Preview")
+            .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// Plain Quick Look preview of the model file; no AR session.
+private struct USDZQuickLookPreview: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> QLPreviewController {
+        let controller = QLPreviewController()
+        controller.dataSource = context.coordinator
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: QLPreviewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(url: url) }
+
+    final class Coordinator: NSObject, QLPreviewControllerDataSource {
+        let url: URL
+        init(url: URL) { self.url = url }
+        func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
+        func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
+            url as NSURL
+        }
+    }
+}
+#endif

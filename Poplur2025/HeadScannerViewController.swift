@@ -1,3 +1,7 @@
+// The ARKit + RealityKit face-tracking head scan (TrueDepth) is compiled out
+// of shipping builds (App Review 2.5.1); nothing references it. Define
+// POPLUR_TRUEDEPTH_HEAD_SCAN to bring it back for experiments.
+#if POPLUR_TRUEDEPTH_HEAD_SCAN
 import UIKit
 import ARKit
 import RealityKit
@@ -244,3 +248,4 @@ enum HeadScanError: Error {
     case unavailable
     case cancelled
 }
+#endif

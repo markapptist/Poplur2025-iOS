@@ -4,8 +4,6 @@
 //
 
 import Foundation
-import ARKit
-import SceneKit
 import CoreImage
 @preconcurrency import Vision
 #if canImport(FirebaseAuth)
@@ -51,9 +49,6 @@ class ARFilterManager: NSObject, ObservableObject {
     
     // MARK: - Private Properties
     
-    private var arSession: ARSession?
-    private var sceneView: ARSCNView?
-    private var currentFaceNode: SCNNode?
     /// CIContext is documented thread-safe; the whole render path runs off the
     /// main actor, so the context lives outside it too.
     private nonisolated(unsafe) let ciContext = CIContext()
@@ -341,35 +336,11 @@ class ARFilterManager: NSObject, ObservableObject {
     
     // MARK: - Public Methods
     
-    /// Setup AR session with face tracking
-    func setupARSession(in view: ARSCNView) {
-        guard ARFaceTrackingConfiguration.isSupported else {
-            print("❌ Face tracking not supported on this device")
-            return
-        }
-        
-        self.sceneView = view
-        self.arSession = view.session
-        
-        // Configure AR session for face tracking
-        let configuration = ARFaceTrackingConfiguration()
-        configuration.isLightEstimationEnabled = true
-        configuration.maximumNumberOfTrackedFaces = 1
-        
-        view.session.run(configuration, options: [.resetTracking, .removeExistingAnchors])
-        view.delegate = self
-        
-        isARActive = true
-        print("✅ AR Face Tracking session started")
-    }
-    
-    /// Stop AR session
+    /// Stop the filter session. The filters are Vision face landmarks plus
+    /// Core Image on the camera feed; no ARKit/TrueDepth session is ever run
+    /// (App Review 2.5.1), so this only clears the state.
     func stopARSession() {
-        arSession?.pause()
-        sceneView?.session.pause()
         isARActive = false
-        currentFaceNode?.removeFromParentNode()
-        currentFaceNode = nil
     }
     
     /// Apply filter to image. Nonisolated and parameterized by the filter so
@@ -1176,41 +1147,6 @@ class ARFilterManager: NSObject, ObservableObject {
             }
         } else {
             self.activeFilter = .none
-        }
-    }
-}
-
-// MARK: - ARSCNViewDelegate
-
-extension ARFilterManager: ARSCNViewDelegate {
-    
-    nonisolated func renderer(_ renderer: SCNSceneRenderer, didAdd node: SCNNode, for anchor: ARAnchor) {
-        guard let faceAnchor = anchor as? ARFaceAnchor else { return }
-        
-        Task { @MainActor in
-            updateFaceNode(node: node, faceAnchor: faceAnchor)
-        }
-    }
-    
-    nonisolated func renderer(_ renderer: SCNSceneRenderer, didUpdate node: SCNNode, for anchor: ARAnchor) {
-        guard let faceAnchor = anchor as? ARFaceAnchor else { return }
-        
-        Task { @MainActor in
-            updateFaceNode(node: node, faceAnchor: faceAnchor)
-        }
-    }
-    
-    private func updateFaceNode(node: SCNNode, faceAnchor: ARFaceAnchor) {
-        if currentFaceNode == nil {
-            guard let device = MTLCreateSystemDefaultDevice(),
-                  let faceGeometry = ARSCNFaceGeometry(device: device) else { return }
-            let faceNode = SCNNode(geometry: faceGeometry)
-            node.addChildNode(faceNode)
-            currentFaceNode = faceNode
-        }
-        
-        if let faceGeometry = currentFaceNode?.geometry as? ARSCNFaceGeometry {
-            faceGeometry.update(from: faceAnchor.geometry)
         }
     }
 }
