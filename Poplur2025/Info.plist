@@ -9,9 +9,9 @@
 	<key>NSFaceIDUsageDescription</key>
 	<string>Poplur uses Face ID to sign you in quickly and securely.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Poplur uses the camera for posts and FaceTime video calls.</string>
+	<string>Poplur uses the camera to take the photos and record the videos you post, and to show you in Poplur video calls. For example, the Camera tab records a video post with the camera.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Poplur uses the microphone for voice commands and Poplur calls.</string>
+	<string>Poplur uses the microphone to record the sound of the videos you post, for your voice in Poplur voice and video calls, and to hear what you say when you dictate a message to Poplur AI. For example, when you record a video post, the microphone captures its audio.</string>
 	<key>PoplurAdMobInterstitialUnitID</key>
 	<string>ca-app-pub-2086359936541081/6696033455</string>
 	<key>UIBackgroundModes</key>

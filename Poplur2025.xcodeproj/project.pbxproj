@@ -665,9 +665,9 @@
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_CFBundleDisplayName = Poplur;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
-				INFOPLIST_KEY_NSCameraUsageDescription = "We need camera access to let you capture photos and videos for your posts.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Poplur uses the camera to take the photos and record the videos you post, and to show you in Poplur video calls. For example, the Camera tab records a video post with the camera.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "We use your location to tag posts on the map and show nearby content.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "“We use the microphone to record audio with your videos.”";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Poplur uses the microphone to record the sound of the videos you post, for your voice in Poplur voice and video calls, and to hear what you say when you dictate a message to Poplur AI. For example, when you record a video post, the microphone captures its audio.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Poplur uses speech recognition to turn what you say into text when you dictate a message to Poplur AI.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "We need permission to save your captured media to your photo library.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We need photo library access so you can choose photos and videos to post.";
@@ -711,9 +711,9 @@
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_CFBundleDisplayName = Poplur;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
-				INFOPLIST_KEY_NSCameraUsageDescription = "We need camera access to let you capture photos and videos for your posts.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Poplur uses the camera to take the photos and record the videos you post, and to show you in Poplur video calls. For example, the Camera tab records a video post with the camera.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "We use your location to tag posts on the map and show nearby content.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "“We use the microphone to record audio with your videos.”";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Poplur uses the microphone to record the sound of the videos you post, for your voice in Poplur voice and video calls, and to hear what you say when you dictate a message to Poplur AI. For example, when you record a video post, the microphone captures its audio.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Poplur uses speech recognition to turn what you say into text when you dictate a message to Poplur AI.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "We need permission to save your captured media to your photo library.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We need photo library access so you can choose photos and videos to post.";
