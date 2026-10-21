@@ -894,6 +894,8 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         private let bannerRelayToken = UUID()
         private let locationRequester = CLLocationManager()
         private var locationPermissionRequestInFlight = false
+        private var locationRequestInFlight = false
+        private var pendingHomeLocation: CLLocation?
         private var photoPermissionRequestInFlight = false
         private var notificationObservers: [NSObjectProtocol] = []
         private var mapDiscoveryTask: Task<Void, Never>?
@@ -2185,7 +2187,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                             locationRequester.requestWhenInUseAuthorization()
                         }
                     case .authorizedWhenInUse, .authorizedAlways:
-                        locationRequester.requestLocation()
+                        requestAuthorizedHomeLocation(reason: "explicit")
                     default:
                         break // Respect denial; never redirect to Settings automatically.
                     }
@@ -3364,8 +3366,11 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         fileprivate func setFeedApplicationActive(_ active: Bool, into webView: WKWebView) {
             feedApplicationPaused = !active
             if active {
+                requestAuthorizedHomeLocation(reason: "foreground")
                 if feedRequested { deliverFeedPosts(into: webView) }
             } else {
+                locationRequester.stopUpdatingLocation()
+                locationRequestInFlight = false
                 suspendFeedSubscriptions()
             }
         }
@@ -3990,6 +3995,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             lastDeliveredPitch = nil
             lastDeliveredHeading = nil
             replayLatestMotion()
+            requestAuthorizedHomeLocation(reason: "ready")
             deliverPendingDMDeepLink()
             deliverPendingPostFocus()
             deliverPendingCallAnswer()
@@ -4101,19 +4107,60 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             }
         }
 
+        /// Feed measures reach in the Home document before Map is ever opened.
+        /// CoreLocation's initial authorization callback can precede that
+        /// document, so request again when its listeners exist and on resume.
+        /// Passive startup only consumes an authorization already granted.
+        private func requestAuthorizedHomeLocation(reason: String) {
+            guard didSignalReady, !feedApplicationPaused, bridge.webView != nil else { return }
+            switch locationRequester.authorizationStatus {
+            case .authorizedWhenInUse, .authorizedAlways:
+                break
+            default:
+                PoplurDiagLog.append("[HomeLocation] skipped phase=\(reason) authorization=\(locationRequester.authorizationStatus.rawValue)")
+                return
+            }
+            if let location = pendingHomeLocation {
+                pendingHomeLocation = nil
+                // Replay only a recent callback held during document loading.
+                if abs(location.timestamp.timeIntervalSinceNow) <= 60 {
+                    deliverHomeLocation(location)
+                }
+            }
+            guard !locationRequestInFlight else {
+                PoplurDiagLog.append("[HomeLocation] pending phase=\(reason)")
+                return
+            }
+            locationRequestInFlight = true
+            PoplurDiagLog.append("[HomeLocation] requested phase=\(reason)")
+            locationRequester.requestLocation()
+        }
+
         func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
             let status = manager.authorizationStatus
             guard status != .notDetermined else { return }
             locationPermissionRequestInFlight = false
             if status == .authorizedWhenInUse || status == .authorizedAlways {
-                manager.requestLocation()
+                requestAuthorizedHomeLocation(reason: "authorization")
             } else {
+                locationRequestInFlight = false
+                pendingHomeLocation = nil
                 print("[PostLoginHomeWebView] location permission not granted: \(status.rawValue)")
             }
         }
 
         func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-            guard let location = locations.last, let webView = bridge.webView else { return }
+            locationRequestInFlight = false
+            guard let location = locations.last else { return }
+            deliverHomeLocation(location)
+        }
+
+        private func deliverHomeLocation(_ location: CLLocation) {
+            guard didSignalReady, !feedApplicationPaused, let webView = bridge.webView else {
+                pendingHomeLocation = location
+                PoplurDiagLog.append("[HomeLocation] deferred until ready")
+                return
+            }
             let payload: [String: Any] = [
                 "type": "poplur-location",
                 "latitude": location.coordinate.latitude,
@@ -4122,6 +4169,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             ]
             guard let data = try? JSONSerialization.data(withJSONObject: payload),
                   let json = String(data: data, encoding: .utf8) else { return }
+            PoplurDiagLog.append("[HomeLocation] delivering to Home")
             webView.evaluateJavaScript(
                 """
                 (function () {
@@ -4140,6 +4188,8 @@ struct PostLoginHomeWebView: UIViewRepresentable {
 
         func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
             locationPermissionRequestInFlight = false
+            locationRequestInFlight = false
+            PoplurDiagLog.append("[HomeLocation] failed code=\((error as NSError).code)")
             print("[PostLoginHomeWebView] current-location request failed: \(error.localizedDescription)")
         }
     }
