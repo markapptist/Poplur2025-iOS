@@ -794,11 +794,9 @@ struct PostLoginHomeWebView: UIViewRepresentable {
     }
 
     private static func backgroundAudioPreference() -> (enabled: Bool, scope: String) {
-        let enabled = SettingsStore.shared.backgroundAudioEnabled
-        guard enabled else { return (false, "screen") }
-        let storedScope = UserDefaults.standard.string(forKey: "poplur.radio.scope")
-        let scope = storedScope == "outside" ? "outside" : "app"
-        return (true, scope)
+        // iOS has no "Radio outside app": the audio background mode is gone
+        // (guideline 2.5.4), so a phone that chose it reads as Across Poplur.
+        SettingsStore.shared.backgroundAudioEnabled ? (true, "app") : (false, "screen")
     }
 
     private static func backgroundAudioBootstrapScript(enabled: Bool, scope: String) -> String {
@@ -2129,14 +2127,9 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     return
                 }
                 if type == "radioScope", let scope = body["scope"] as? String,
-                   ["screen", "app", "outside"].contains(scope) {
+                   ["screen", "app"].contains(scope) {
                     UserDefaults.standard.set(scope, forKey: "poplur.radio.scope")
                     SettingsStore.shared.backgroundAudioEnabled = scope != "screen"
-                    if scope == "outside" {
-                        let session = AVAudioSession.sharedInstance()
-                        try? session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
-                        try? session.setActive(true)
-                    }
                     return
                 }
                 if type == "requestBackgroundAudio", let webView = bridge.webView {

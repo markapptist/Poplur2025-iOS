@@ -34,6 +34,12 @@ import UIKit
 /// and no PushKit registry, so no VoIP push is ever delivered or reported, and
 /// any token stored earlier is withdrawn. In-app calls still work through the
 /// page while Poplur is open; they just never ring a closed phone.
+///
+/// Off everywhere for now: `ringsClosedPhones` is false because nothing sends
+/// VoIP pushes yet (no APNs key, `ringIphoneCalls` not deployed), and App Review
+/// rejected the `voip` background mode with no feature using it (guideline
+/// 2.5.4, 3 Nov 2026). To switch on: set it true, restore `voip` under
+/// UIBackgroundModes in Info.plist, and send App Review a screen recording.
 @MainActor
 final class PoplurCallKit: NSObject {
     static let shared = PoplurCallKit()
@@ -84,9 +90,12 @@ final class PoplurCallKit: NSObject {
     private var calls: [UUID: Presented] = [:]
     private var pendingAnswer: IncomingCall?
 
+    nonisolated private static let ringsClosedPhones = false
+
     /// False for the mainland China storefront, or a mainland China region
     /// when the storefront is not known yet. Decided once per launch.
     nonisolated static let isAllowedHere: Bool = {
+        guard ringsClosedPhones else { return false }
         if let country = SKPaymentQueue.default().storefront?.countryCode {
             return country.uppercased() != "CHN"
         }
