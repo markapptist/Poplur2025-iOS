@@ -696,6 +696,15 @@
     #paneCreateLogin .stackField { height: clamp(40px, 11cqw, 46px); }
     #paneCreateLogin .stackBtn { margin: 4px auto 0; }
   }
+  /* Keyboard up: the form rises to sit on the keyboard instead of squeezing
+     into the strip between the cube and the keyboard, where only part of one
+     field showed. The logo steps aside and the cube shrinks into the space
+     it leaves, so it stays on screen without sitting under the fields. */
+  .kbOpen .formStack { top: max(12px, env(safe-area-inset-top, 0px)); justify-content: flex-start; }
+  .kbOpen .formStack > :first-child { margin-top: auto; }
+  .kbOpen .wLogoWrap { opacity: 0; pointer-events: none; }
+  /* !important: the measured layout writes the risen cube's top inline. */
+  .kbOpen .cubeStage { top: 10.5% !important; transform: translate(-50%, -50%) scale(0.34); }
   /* Review rows */
   .reviewRow {
     width: 100%; max-width: 300px; display: flex; justify-content: space-between; gap: 10px;
@@ -1081,9 +1090,15 @@
     const keyboardResize = keyboardEditorIsFocused()
       && widthIsStable
       && innerHeight < stableViewportHeight - 80
-    if (!keyboardResize) {
+    // Only a width change (rotation, iPad split) may shrink the layout. A
+    // keyboard that is still closing when focus has already left the field
+    // used to be recorded here as the new full height, which clipped the
+    // whole lower half of the page (Sign In button, "Create an account").
+    if (!widthIsStable) {
       stableViewportWidth = innerWidth
       stableViewportHeight = innerHeight
+    } else if (!keyboardResize) {
+      stableViewportHeight = Math.max(stableViewportHeight, innerHeight)
     }
     window.__poplurKeyboardResize = keyboardResize
     window.__poplurLayoutHeight = stableViewportHeight
@@ -1108,6 +1123,7 @@
       ? Math.max(0, stableViewportHeight - visual.height - visual.offsetTop)
       : 0
     document.documentElement.style.setProperty('--poplur-keyboard-inset', keyboardInset + 'px')
+    document.documentElement.classList.toggle('kbOpen', keyboardInset > 40)
     if (!editing || !(active instanceof HTMLElement)) return
     const stack = active.closest('.formStack')
     if (!stack) return
