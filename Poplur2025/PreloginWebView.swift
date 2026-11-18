@@ -917,11 +917,14 @@ struct PreloginWebView: UIViewRepresentable {
                     return
                 }
                 let profilePhotoData: Data?
-                if accountType == "personal" {
+                let rawProfilePhoto = (body?["profilePhotoDataURI"] as? String) ?? ""
+                if accountType == "personal" && rawProfilePhoto.isEmpty {
+                    // The photo is optional (App Review 5.1.1(v), 18 Nov 2026):
+                    // an account needs no picture of its owner.
+                    profilePhotoData = nil
+                } else if accountType == "personal" {
                     do {
-                        profilePhotoData = try Self.decodeProfilePhotoDataURI(
-                            body?["profilePhotoDataURI"] as? String
-                        )
+                        profilePhotoData = try Self.decodeProfilePhotoDataURI(rawProfilePhoto)
                     } catch {
                         print("[PreloginWebView] rejected invalid personal profile photo")
                         postAuthResult(ok: false, error: "Choose your profile photo again, then create your account.")

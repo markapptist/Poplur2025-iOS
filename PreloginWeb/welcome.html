@@ -975,7 +975,7 @@
   <div class="pane" id="paneProfilePhoto" aria-label="Profile photo">
     <div class="formStack">
       <p class="clayText paneTitle stackTitle">Add a profile photo</p>
-      <p class="stackSub">Show your radius who you are.</p>
+      <p class="stackSub">Optional &#183; show your radius who you are, or add one later.</p>
       <span class="photoCircle" id="photoCircle"><span>+</span></span>
       <label class="uploadBtn">Upload photo<input id="photoInput" type="file" accept="image/*" hidden></label>
       <button class="cap-btn stackBtn" type="button" data-photo-continue><span class="shader-text">Continue</span></button>
@@ -2372,7 +2372,8 @@
       reader.readAsDataURL(file)
     })
     document.querySelector('#paneProfilePhoto [data-photo-continue]').addEventListener('click', function () {
-      if (!photoSet) return signupError('Upload a photo of yourself to continue.')
+      // Optional (App Review 5.1.1(v), 18 Nov 2026): an account needs no photo
+      // of its owner. Continue without one; it can be added from Profile later.
       finishSignup('Account created — welcome to Poplur!')
     })
     // Verify → all four digits entered → Review
