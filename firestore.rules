@@ -57,6 +57,14 @@ service cloud.firestore {
       return ['playCount', 'reachCount', 'featured'];
     }
 
+    // Anyone can read a track row, so its place is the same ~110 m cell a
+    // public pop shows (0.001 degree), never the spot the artist stood on. A
+    // coordinate that comes back unchanged from rounding to three decimals is
+    // already on that grid.
+    function isPublicCoordinate(value) {
+      return value is number && math.round(value * 1000) / 1000.0 == value;
+    }
+
     function protectedPremiumAIFields() {
       return [
         'isPremium',
@@ -378,6 +386,8 @@ service cloud.firestore {
         && request.resource.data.lng is number
         && request.resource.data.lat >= -90 && request.resource.data.lat <= 90
         && request.resource.data.lng >= -180 && request.resource.data.lng <= 180
+        && isPublicCoordinate(request.resource.data.lat)
+        && isPublicCoordinate(request.resource.data.lng)
         // Set by the server clock, so "newest" cannot be bought with a lie.
         && request.resource.data.createdAt == request.time
         && !request.resource.data.keys().hasAny(countedTrackFields());
@@ -387,7 +397,11 @@ service cloud.firestore {
       allow update: if signedIn()
         && resource.data.userID == request.auth.uid
         && request.resource.data.userID == resource.data.userID
-        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(countedTrackFields());
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(countedTrackFields())
+        // Moving a track is allowed, but only to another ~110 m cell.
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['lat', 'lng'])
+          || (isPublicCoordinate(request.resource.data.lat)
+            && isPublicCoordinate(request.resource.data.lng)));
 
       allow delete: if signedIn() && resource.data.userID == request.auth.uid;
     }

@@ -65,10 +65,15 @@ enum WebTrackPublisher {
             fail("Give the track a name first.")
             return
         }
-        guard let lat = body["latitude"] as? Double, let lng = body["longitude"] as? Double else {
+        guard let exactLat = body["latitude"] as? Double, let exactLng = body["longitude"] as? Double else {
             fail("Poplur could not tell where you are, and a track has to be left somewhere.")
             return
         }
+        // Anyone can read a track row (firestore.rules), so it carries the same
+        // ~110 m cell a public pop does, never the spot the artist stood on.
+        // The rules refuse anything finer.
+        let lat = (exactLat * 1_000).rounded() / 1_000
+        let lng = (exactLng * 1_000).rounded() / 1_000
 
         let trackID = UUID().uuidString
         let object = Storage.storage().reference(withPath: "music/\(uid)/\(trackID).wav")
