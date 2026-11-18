@@ -681,7 +681,42 @@
     font-size: clamp(10px, 2.8cqw, 12px); font-weight: 800; color: #fff;
     text-shadow: 0 1.5px 0 rgba(150, 10, 70, 0.4);
   }
-  .stackAgree input { width: 18px; height: 18px; accent-color: #f4459c; }
+  .stackAgree input { width: 18px; height: 18px; accent-color: #f4459c; flex: 0 0 auto; }
+  .stackAgree span { line-height: 1.3; }
+  .termsLink {
+    font: inherit; color: inherit; text-shadow: inherit; background: none; border: 0; padding: 0;
+    text-decoration: underline; text-underline-offset: 2px; cursor: pointer;
+  }
+  .termsNote {
+    margin: 2px 0 0; text-align: center;
+    font-family: "Arial Rounded MT Bold", ui-rounded, system-ui, sans-serif;
+    font-size: clamp(9px, 2.6cqw, 11px); font-weight: 800; color: #fff;
+    text-shadow: 0 1.5px 0 rgba(150, 10, 70, 0.4);
+  }
+  /* Terms of Use, readable before anyone signs up or signs in (App Review 1.2). */
+  .termsSheet {
+    position: fixed; inset: 0; z-index: 2147483000; display: flex; align-items: center; justify-content: center;
+    padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+    background: rgba(40, 8, 26, 0.55); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+  }
+  .termsSheet[hidden] { display: none; }
+  .termsCard {
+    width: min(420px, 100%); max-height: 100%; display: flex; flex-direction: column;
+    background: #fff7fb; color: #2a1d22; border-radius: 22px;
+    box-shadow: 0 6px 0 rgba(20, 8, 14, 0.35), 0 16px 32px rgba(194, 17, 122, 0.35);
+    font-family: "Arial Rounded MT Bold", ui-rounded, system-ui, sans-serif;
+  }
+  .termsCard h2 { margin: 18px 20px 4px; font-size: 20px; font-weight: 900; color: #c2117a; }
+  .termsCard .termsUpdated { margin: 0 20px 8px; font-size: 11px; font-weight: 800; color: #6f5867; }
+  .termsBody { overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 0 20px; font-size: 13px; line-height: 1.45; font-weight: 600; }
+  .termsBody h3 { margin: 14px 0 4px; font-size: 14px; font-weight: 900; color: #2a1d22; }
+  .termsBody p, .termsBody ul { margin: 0 0 8px; }
+  .termsBody ul { padding-left: 18px; }
+  .termsClose {
+    margin: 12px 20px 18px; padding: 12px; border: 0; border-radius: 14px;
+    background: #f4459c; color: #fff; font: inherit; font-size: 15px; font-weight: 900;
+    box-shadow: 0 4px 0 rgba(150, 10, 70, 0.45);
+  }
   .stackBtn { position: static; transform: none; margin: 8px auto 4px; flex: 0 0 auto; }
   /* On compact phones the measured hero layout can otherwise claim too much
      of the form pane. This preserves clearance below the cube while giving
@@ -841,6 +876,7 @@
         <button class="forgotBtn" type="button">FORGOT</button>
       </div>
       <button class="cap-btn paneBtn" type="button"><span class="shader-text">Sign In</span></button>
+      <p class="termsNote">By signing in you agree to the <button type="button" class="termsLink" data-open-terms>Terms of Use</button>.</p>
       <button class="authLink" type="button" data-goto="2">New here? <u>Create an account</u></button>
     </div>
   </div>
@@ -888,12 +924,9 @@
         <span class="stackLbl">CONFIRM PASSWORD</span>
         <input class="stackField" type="password" placeholder="&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;" autocomplete="new-password">
       </div>
-      <div class="stackDob">
-        <div class="stackDobCol"><span class="stackLbl">MONTH</span><select class="stackField stackSelect" id="dobMonth" required><option value="" selected disabled>Month</option><option value="1">Jan</option><option value="2">Feb</option><option value="3">Mar</option><option value="4">Apr</option><option value="5">May</option><option value="6">Jun</option><option value="7">Jul</option><option value="8">Aug</option><option value="9">Sep</option><option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option></select></div>
-        <div class="stackDobCol"><span class="stackLbl">DAY</span><select class="stackField stackSelect" id="dobDay" required><option value="" selected disabled>Day</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option><option>13</option><option>14</option><option>15</option><option>16</option><option>17</option><option>18</option><option>19</option><option>20</option><option>21</option><option>22</option><option>23</option><option>24</option><option>25</option><option>26</option><option>27</option><option>28</option><option>29</option><option>30</option><option>31</option></select></div>
-        <div class="stackDobCol"><span class="stackLbl">YEAR</span><select class="stackField stackSelect" id="dobYear" required><option value="" selected disabled>Year</option></select></div>
-      </div>
-      <label class="stackAgree"><input type="checkbox" checked> I agree to the Terms of Service</label>
+      <!-- App Review 5.1.1(v), 18 Nov 2026: no date of birth. The age gate is a
+           confirmation, unticked, together with the Terms of Use (1.2). -->
+      <label class="stackAgree"><input type="checkbox" id="agreeTerms"> <span>I&#8217;m 13 or older and agree to the <button type="button" class="termsLink" data-open-terms>Terms of Use</button></span></label>
       <button class="cap-btn stackBtn" type="button" data-signup-next><span class="shader-text">Create account</span></button>
     </div>
   </div>
@@ -961,6 +994,38 @@
         <span><span class="acctName">Female</span><br><span class="acctDesc">The female head</span></span>
       </button>
       <p class="stackSub">You can change this any time in Settings &#183; Profile.</p>
+    </div>
+  </div>
+  <div class="termsSheet" id="termsSheet" role="dialog" aria-modal="true" aria-labelledby="termsTitle" hidden>
+    <div class="termsCard">
+      <h2 id="termsTitle">Poplur Terms of Use</h2>
+      <p class="termsUpdated">Updated 18 November 2026</p>
+      <div class="termsBody">
+        <p>These terms are an agreement between you and Apptist Inc., which makes Poplur. By creating an account or signing in, you agree to them.</p>
+        <h3>Who can use Poplur</h3>
+        <p>You must be 13 or older. Accounts we believe belong to someone under 13 are removed.</p>
+        <h3>No objectionable content or abusive users</h3>
+        <p>Poplur has zero tolerance for objectionable content and abusive behaviour. You must not post, send or share:</p>
+        <ul>
+          <li>anything that sexualizes a minor, or any sexual or pornographic content;</li>
+          <li>harassment, bullying, threats, hate speech or content that attacks people for who they are;</li>
+          <li>graphic violence, or content that promotes self-harm, terrorism or illegal activity;</li>
+          <li>spam, scams, impersonation, or other people&#8217;s private information;</li>
+          <li>content you do not have the right to share.</li>
+        </ul>
+        <h3>Reporting and blocking</h3>
+        <p>Every pop has a Report button: the round no-entry button on its controls. Tap it and choose Report pop, or open the pop&#8217;s comments and choose Report this pop. To block someone, tap the same button and choose Block, or open their profile and tap Block. Blocking removes their pops from your feed and map straight away, and tells Poplur.</p>
+        <p>We review reports within 24 hours. We remove content that breaks these terms and ban the accounts that posted it.</p>
+        <h3>Your content</h3>
+        <p>You own what you post. You let Poplur show it to people in your radius, on the map and in the feed, for as long as it is live. Your pops are placed on the map where you post them.</p>
+        <h3>Poplur Credits</h3>
+        <p>Credits are bought in the app or granted in fixed amounts. They have no cash value, cannot be exchanged for money and are used only in Poplur.</p>
+        <h3>Deleting your account</h3>
+        <p>You can delete your account at any time in Settings &#8594; Delete account. Your account, profile, posts and messages are deleted from our servers.</p>
+        <h3>Changes and contact</h3>
+        <p>We may update these terms and will show the new version in the app. Questions or reports: apptistinc@gmail.com.</p>
+      </div>
+      <button type="button" class="termsClose" id="termsClose">Close</button>
     </div>
   </div>
   <audio id="popSfx" preload="auto" src="/Poplur2025-iOS/Poplur2025/pop.mp3"></audio>
@@ -2089,21 +2154,35 @@
 
     document.getElementById('introNext').addEventListener('click', function () { setPane(3) })
     // Create login → validated → Business profile (business) or done (personal)
+    // Terms of Use sheet: opened from Create login and Sign in, before an
+    // account exists. The links sit inside a <label>, so stop the tap from
+    // also ticking the box.
+    ;(function () {
+      var sheet = document.getElementById('termsSheet')
+      if (!sheet) return
+      function openTerms(event) {
+        if (event) { event.preventDefault(); event.stopPropagation() }
+        sheet.hidden = false
+        var body = sheet.querySelector('.termsBody'); if (body) body.scrollTop = 0
+        var close = document.getElementById('termsClose'); if (close) close.focus({ preventScroll: true })
+      }
+      function closeTerms() { sheet.hidden = true }
+      document.querySelectorAll('[data-open-terms]').forEach(function (link) { link.addEventListener('click', openTerms) })
+      document.getElementById('termsClose').addEventListener('click', closeTerms)
+      sheet.addEventListener('click', function (event) { if (event.target === sheet) closeTerms() })
+      ;['pointerdown', 'pointerup', 'touchstart', 'touchend'].forEach(function (type) {
+        sheet.addEventListener(type, function (event) { event.stopPropagation() })
+      })
+      window.__poplurOpenTerms = openTerms
+    })()
     document.querySelector('#paneCreateLogin [data-signup-next]').addEventListener('click', function () {
       var email = document.querySelector('#paneCreateLogin input[type="email"]').value.trim()
       var pws = document.querySelectorAll('#paneCreateLogin input[type="password"]')
       var agree = document.querySelector('#paneCreateLogin input[type="checkbox"]').checked
-      var dobMonth = +(document.getElementById('dobMonth').value || 0)
-      var dobDay = +(document.getElementById('dobDay').value || 0)
-      var dobYear = +(document.getElementById('dobYear').value || 0)
       if (!/.+@.+\..+/.test(email)) return signupError('Enter a valid email address.')
       if (pws[0].value.length < 6) return signupError('Your password needs at least 6 characters.')
       if (pws[0].value !== pws[1].value) return signupError('Those passwords don’t match.')
-      if (!dobMonth || !dobDay || !dobYear) return signupError('Enter your date of birth.')
-      var dobToday = new Date(), dobAge = dobToday.getFullYear() - dobYear
-      if (dobToday.getMonth() + 1 < dobMonth || (dobToday.getMonth() + 1 === dobMonth && dobToday.getDate() < dobDay)) dobAge--
-      if (dobAge < 13) return signupError('You must be 13 or older to use Poplur.')
-      if (!agree) return signupError('Please agree to the Terms of Service.')
+      if (!agree) return signupError('Please confirm you’re 13 or older and agree to the Terms of Use.')
       if (isBusiness()) setPane(4)
       else setPane(7)  // personal: add a profile photo next
     })
